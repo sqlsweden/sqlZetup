@@ -25,6 +25,9 @@
 .PARAMETER SQLSYSADMINACCOUNTS
     The domain accounts to be added as SQL Server system administrators.
 
+.PARAMETER DebugMode
+    Enables detailed logging and verbose output for debugging purposes.
+
 .NOTES
     - This script must be run as an administrator.
     - This script only supports machines that are part of a domain.
@@ -32,18 +35,24 @@
     - Adjust the script parameters as necessary for your environment.
 
 .EXAMPLE
-    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2019_9" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup"
+    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2019_9" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -DebugMode $true
 
-    This example installs a SQL Server instance named "SQL2019_9" using the specified domain account and ISO file, and adds the specified sysadmin accounts.
+    This example installs a SQL Server instance named "SQL2019_9" using the specified domain account and ISO file, adds the specified sysadmin accounts, and enables debugging mode.
 #>
 
 # Configurable parameters
 param(
-    [string]$sqlInstanceName = "SQL2019_9", # Set the SQL Server instance name
+    [string]$sqlInstanceName = "SQL2019_6", # Set the SQL Server instance name
     [string]$serviceDomainAccount = "agdemo\SQLEngine", # Set the domain account for SQL Server service
     [string]$sqlInstallerLocalPath = "C:\Temp\SQLServerSetup.iso", # Set the local path to the SQL Server installer ISO or EXE
-    [string]$SQLSYSADMINACCOUNTS = "agdemo\sqlgroup" # Set the domain accounts to be added as sysadmins
+    [string]$SQLSYSADMINACCOUNTS = "agdemo\sqlgroup", # Set the domain accounts to be added as sysadmins
+    [switch]$DebugMode = $False # Enable debugging mode
 )
+
+# Set verbose preference based on DebugMode
+if ($DebugMode) {
+    $VerbosePreference = "Continue"
+}
 
 # Function to show progress messages
 function Show-ProgressMessage {
@@ -57,6 +66,9 @@ function Show-ProgressMessage {
         [string]$Message
     )
     Write-Host "$Message"
+    if ($DebugMode) {
+        Write-Verbose "$Message"
+    }
 }
 
 # Function to check if running as Administrator
@@ -145,6 +157,8 @@ function Mount-IsoAndGetSetupPath {
     $driveLetter = ($mountResult | Get-Volume).DriveLetter
     $setupPath = "$($driveLetter):\setup.exe"
 
+    Write-Verbose "Mounted ISO at $driveLetter and found setup.exe at $setupPath"
+
     return $setupPath
 }
 
@@ -158,6 +172,9 @@ function Get-NumberOfCores {
     #>
     $processorInfo = Get-WmiObject -Class Win32_Processor
     $coreCount = ($processorInfo | Measure-Object -Property NumberOfCores -Sum).Sum
+
+    Write-Verbose "Number of CPU cores: $coreCount"
+
     return $coreCount
 }
 
@@ -200,6 +217,8 @@ function Get-InstallerPath {
     )
 
     $fileExtension = [System.IO.Path]::GetExtension($installerPath).ToLower()
+
+    Write-Verbose "Installer file extension: $fileExtension"
 
     if ($fileExtension -eq ".iso") {
         return Mount-IsoAndGetSetupPath -isoPath $installerPath
