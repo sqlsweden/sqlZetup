@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Script to install SQL Server instance using either an ISO or EXE installer.
+    Script to install SQL Server 2019 Developer Edition instance using either an ISO or EXE installer.
 
 .DESCRIPTION
     This script performs the following actions:
@@ -12,6 +12,11 @@
     - Determines the installer path based on the provided ISO or EXE file.
     - Executes the SQL Server installation with specified parameters.
     - Verifies the installation and checks for logs in case of errors.
+
+    This script specifically installs SQL Server 2019 Developer Edition and ensures that the installation directories are configured correctly.
+    The script enforces the following conditions:
+    - Installation directories must not be on the `C:` drive.
+    - All installation directories must have a block size of 64 KB.
 
 .PARAMETER sqlInstanceName
     The name of the SQL Server instance to be installed (e.g., "MSSQLSERVER" for default instance, "MYINSTANCE" for named instance).
@@ -25,6 +30,18 @@
 .PARAMETER SQLSYSADMINACCOUNTS
     The domain accounts to be added as SQL Server system administrators.
 
+.PARAMETER SQLTEMPDBDIR
+    The directory for SQL TEMPDB data files.
+
+.PARAMETER SQLTEMPDBLOGDIR
+    The directory for SQL TEMPDB log files.
+
+.PARAMETER SQLUSERDBDIR
+    The directory for SQL user database data files.
+
+.PARAMETER SQLUSERDBLOGDIR
+    The directory for SQL user database log files.
+
 .PARAMETER DebugMode
     Enables detailed logging and verbose output for debugging purposes.
 
@@ -34,10 +51,15 @@
     - Ensure the provided SQL Server installer path is valid and accessible.
     - Adjust the script parameters as necessary for your environment.
 
-.EXAMPLE
-    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2019_9" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -DebugMode $true
+.REQUIREMENTS
+    - SQL Server 2019 Developer Edition installer ISO or EXE file.
+    - The installation directories must be configured on partitions other than the `C:` drive.
+    - The block size of the partitions used for installation must be 64 KB.
 
-    This example installs a SQL Server instance named "SQL2019_9" using the specified domain account and ISO file, adds the specified sysadmin accounts, and enables debugging mode.
+.EXAMPLE
+    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2019_9" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -SQLTEMPDBDIR "D:\tempdbdata" -SQLTEMPDBLOGDIR "D:\tempdblog" -SQLUSERDBDIR "E:\userdbdata" -SQLUSERDBLOGDIR "E:\userdblog" -DebugMode $true
+
+    This example installs a SQL Server 2019 Developer Edition instance named "SQL2019_9" using the specified domain account and ISO file, adds the specified sysadmin accounts, sets the directories for TEMPDB and user databases, and enables debugging mode.
 #>
 
 # Configurable parameters
@@ -46,8 +68,29 @@ param(
     [string]$serviceDomainAccount = "agdemo\SQLEngine", # Set the domain account for SQL Server service
     [string]$sqlInstallerLocalPath = "C:\Temp\SQLServerSetup.iso", # Set the local path to the SQL Server installer ISO or EXE
     [string]$SQLSYSADMINACCOUNTS = "agdemo\sqlgroup", # Set the domain accounts to be added as sysadmins
+    [string]$SQLTEMPDBDIR = "D:\tempdbdata", # Set the directory for SQL TEMPDB data files
+    [string]$SQLTEMPDBLOGDIR = "D:\tempdblog", # Set the directory for SQL TEMPDB log files
+    [string]$SQLUSERDBDIR = "E:\userdbdata", # Set the directory for SQL user database data files
+    [string]$SQLUSERDBLOGDIR = "E:\userdblog", # Set the directory for SQL user database log files
     [switch]$DebugMode = $False # Enable debugging mode
 )
+
+# Function to check if the block size of a given drive is 64 KB
+function Test-BlockSize {
+    param (
+        [string]$driveLetter
+    )
+
+    # Get the block size using Get-Partition and Get-Volume
+    $partition = Get-Partition -DriveLetter $driveLetter.TrimEnd(':')
+    $blockSize = $partition | Get-Volume | Select-Object -ExpandProperty AllocationUnitSize
+
+    if ($blockSize -ne 65536) {
+        Write-Host "The block size for drive $driveLetter is not 64 KB. Current block size: $($blockSize / 1024) KB" -ForegroundColor Red
+        return $false
+    }
+    return $true
+}
 
 # Set verbose preference based on DebugMode
 if ($DebugMode) {
@@ -249,6 +292,35 @@ else {
     Write-Host "SQL Server instance $sqlInstanceName does not exist. Proceeding with installation." -ForegroundColor Green
 }
 
+# Check block size for all relevant partitions
+$partitionsToCheck = @($SQLTEMPDBDIR, $SQLTEMPDBLOGDIR, $SQLUSERDBDIR, $SQLUSERDBLOGDIR)
+$allPartitionsExist = $true
+$installationNotAllowedOnC = $false
+
+foreach ($path in $partitionsToCheck) {
+    if (Test-Path $path) {
+        $driveLetter = (Get-Item -Path $path).PSDrive.Name
+        if ($driveLetter -eq "C") {
+            Write-Host "Installation not allowed on drive C:. Path: $path. Installation aborted." -ForegroundColor Red
+            $installationNotAllowedOnC = $true
+        }
+        elseif (-not (Test-BlockSize -driveLetter $driveLetter)) {
+            Write-Host "Block size check failed for path: $path. Installation aborted." -ForegroundColor Red
+            Exit 1
+        }
+    }
+    else {
+        Write-Host "Path $path does not exist. Installation aborted." -ForegroundColor Red
+        $allPartitionsExist = $false
+    }
+}
+
+if (-not $allPartitionsExist -or $installationNotAllowedOnC) {
+    Exit 1
+}
+
+Write-Host "All relevant partitions have a block size of 64 KB." -ForegroundColor Green
+
 # Prompt for input of passwords
 Show-ProgressMessage -Message "Prompting for input of passwords..."
 Get-SecurePasswords
@@ -283,12 +355,12 @@ $params = @{
     "SQLSVCINSTANTFILEINIT"         = "True"
     "TCPENABLED"                    = "1"
     "SQLTEMPDBFILECOUNT"            = $SQLTEMPDBFILECOUNT
-    "SQLTEMPDBDIR"                  = "C:\tempdbdata"
-    "SQLTEMPDBLOGDIR"               = "C:\tempdblog"
+    "SQLTEMPDBDIR"                  = $SQLTEMPDBDIR
+    "SQLTEMPDBLOGDIR"               = $SQLTEMPDBLOGDIR
     "SQLTEMPDBFILESIZE"             = "64"
     "SQLTEMPDBLOGFILESIZE"          = "64"
-    "SQLUSERDBDIR"                  = "C:\userdbdata"
-    "SQLUSERDBLOGDIR"               = "C:\userdblog"
+    "SQLUSERDBDIR"                  = $SQLUSERDBDIR
+    "SQLUSERDBLOGDIR"               = $SQLUSERDBLOGDIR
     "USESQLRECOMMENDEDMEMORYLIMITS" = $null
 }
 
