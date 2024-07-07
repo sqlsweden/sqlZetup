@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Script to install SQL Server 2019 Developer Edition instance using either an ISO or EXE installer.
+    Script to install SQL Server Developer Edition instance using either an ISO or EXE installer, and optionally install SQL Server Management Studio (SSMS).
 
 .DESCRIPTION
     This script performs the following actions:
@@ -11,9 +11,11 @@
     - Calculates the number of TEMPDB files based on the number of CPU cores.
     - Determines the installer path based on the provided ISO or EXE file.
     - Executes the SQL Server installation with specified parameters.
+    - Optionally installs SQL Server Management Studio (SSMS).
     - Verifies the installation and checks for logs in case of errors.
+    - Sets the SQL Server instance port number if specified and verifies it is not already in use.
 
-    This script specifically installs SQL Server 2019 Developer Edition and ensures that the installation directories are configured correctly.
+    This script installs SQL Server Developer Edition (2016, 2017, 2019, or 2022) and ensures that the installation directories are configured correctly.
     The script enforces the following conditions:
     - Installation directories must not be on the `C:` drive.
     - All installation directories must have a block size of 64 KB.
@@ -42,8 +44,20 @@
 .PARAMETER SQLUSERDBLOGDIR
     The directory for SQL user database log files.
 
+.PARAMETER SQLVersion
+    The version of SQL Server to be installed (e.g., 2016, 2017, 2019, 2022).
+
+.PARAMETER InstallSSMS
+    Switch to indicate if SQL Server Management Studio (SSMS) should be installed.
+
+.PARAMETER SSMSInstallerPath
+    The local path to the SSMS installer EXE file.
+
 .PARAMETER DebugMode
     Enables detailed logging and verbose output for debugging purposes.
+
+.PARAMETER PortNumber
+    The TCP port number to be used by the SQL Server instance.
 
 .NOTES
     - This script must be run as an administrator.
@@ -52,28 +66,63 @@
     - Adjust the script parameters as necessary for your environment.
 
 .REQUIREMENTS
-    - SQL Server 2019 Developer Edition installer ISO or EXE file.
+    - SQL Server Developer Edition installer ISO or EXE file for the specified version.
     - The installation directories must be configured on partitions other than the `C:` drive.
     - The block size of the partitions used for installation must be 64 KB.
 
 .EXAMPLE
-    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2019_9" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -SQLTEMPDBDIR "D:\tempdbdata" -SQLTEMPDBLOGDIR "D:\tempdblog" -SQLUSERDBDIR "E:\userdbdata" -SQLUSERDBLOGDIR "E:\userdblog" -DebugMode $true
+    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2022" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -SQLTEMPDBDIR "D:\tempdbdata" -SQLTEMPDBLOGDIR "D:\tempdblog" -SQLUSERDBDIR "E:\userdbdata" -SQLUSERDBLOGDIR "E:\userdblog" -SQLVersion 2022 -InstallSSMS -SSMSInstallerPath "C:\Temp\SSMS-Setup-ENU.exe" -DebugMode $true -PortNumber 1433
 
-    This example installs a SQL Server 2019 Developer Edition instance named "SQL2019_9" using the specified domain account and ISO file, adds the specified sysadmin accounts, sets the directories for TEMPDB and user databases, and enables debugging mode.
+    This example installs a SQL Server 2022 Developer Edition instance named "SQL2022" using the specified domain account and ISO file, adds the specified sysadmin accounts, sets the directories for TEMPDB and user databases, installs SSMS, enables debugging mode, and sets the TCP port number to 1433.
 #>
 
 # Configurable parameters
 param(
-    [string]$sqlInstanceName = "SQL2019_6", # Set the SQL Server instance name
+    [string]$sqlInstanceName = "SQL2022_9", # Set the SQL Server instance name
     [string]$serviceDomainAccount = "agdemo\SQLEngine", # Set the domain account for SQL Server service
-    [string]$sqlInstallerLocalPath = "C:\Temp\SQLServerSetup.iso", # Set the local path to the SQL Server installer ISO or EXE
+    [string]$sqlInstallerLocalPath = "C:\Temp\sqlsetup\SQLServer2022-x64-ENU-Dev.iso", # Set the local path to the SQL Server installer ISO or EXE
     [string]$SQLSYSADMINACCOUNTS = "agdemo\sqlgroup", # Set the domain accounts to be added as sysadmins
-    [string]$SQLTEMPDBDIR = "D:\tempdbdata", # Set the directory for SQL TEMPDB data files
-    [string]$SQLTEMPDBLOGDIR = "D:\tempdblog", # Set the directory for SQL TEMPDB log files
-    [string]$SQLUSERDBDIR = "E:\userdbdata", # Set the directory for SQL user database data files
-    [string]$SQLUSERDBLOGDIR = "E:\userdblog", # Set the directory for SQL user database log files
-    [switch]$DebugMode = $False # Enable debugging mode
+    [string]$SQLTEMPDBDIR = "e:\tempdbdata9", # Set the directory for SQL TEMPDB data files
+    [string]$SQLTEMPDBLOGDIR = "e:\tempdblog9", # Set the directory for SQL TEMPDB log files
+    [string]$SQLUSERDBDIR = "e:\userdbdata", # Set the directory for SQL user database data files
+    [string]$SQLUSERDBLOGDIR = "e:\userdblog", # Set the directory for SQL user database log files
+    [ValidateSet("2016", "2017", "2019", "2022")]
+    [string]$SQLVersion = "2022", # Set the SQL Server version
+    [switch]$InstallSSMS = $true, # Install SQL Server Management Studio
+    [string]$SSMSInstallerPath = "C:\Temp\sqlsetup\SSMS-Setup-ENU.exe", # Set the local path to the SSMS installer EXE
+    [switch]$DebugMode = $False, # Enable debugging mode
+    [int]$PortNumber = 1933 # Set the TCP port number
 )
+
+# Function to check if SSMS is installed
+function Test-SSMSInstalled {
+    param (
+        [string]$SSMSVersion = "18"
+    )
+
+    $registryPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    
+    foreach ($registryPath in $registryPaths) {
+        $installedPrograms = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue |
+        Get-ItemProperty -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -like "Microsoft SQL Server Management Studio*" }
+        
+        if ($installedPrograms) {
+            Write-Host "SSMS is installed:"
+            foreach ($program in $installedPrograms) {
+                Write-Host "Name: $($program.DisplayName)"
+                Write-Host "Version: $($program.DisplayVersion)"
+            }
+            return $true
+        }
+    }
+    
+    Write-Host "SSMS is not installed."
+    return $false
+}
 
 # Function to check if the block size of a given drive is 64 KB
 function Test-BlockSize {
@@ -90,6 +139,20 @@ function Test-BlockSize {
         return $false
     }
     return $true
+}
+
+# Function to check if a port is already in use
+function Test-PortInUse {
+    param (
+        [int]$port
+    )
+
+    $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+    if ($connections) {
+        Write-Host "Port $port is already in use." -ForegroundColor Red
+        return $true
+    }
+    return $false
 }
 
 # Set verbose preference based on DebugMode
@@ -227,7 +290,13 @@ function Check-InstallationLogs {
     .SYNOPSIS
         Checks and displays the SQL Server installation logs in case of errors.
     #>
-    $logPath = "C:\Program Files\Microsoft SQL Server\150\Setup Bootstrap\Log"
+    $logVersionMap = @{
+        "2016" = "130"
+        "2017" = "140"
+        "2019" = "150"
+        "2022" = "160"
+    }
+    $logPath = "C:\Program Files\Microsoft SQL Server\$($logVersionMap[$SQLVersion])\Setup Bootstrap\Log"
     if (Test-Path $logPath) {
         Write-Host "Checking SQL Server setup log at: $logPath" -ForegroundColor Yellow
         $logFilePath = Join-Path -Path $logPath -ChildPath "Summary.txt"
@@ -275,6 +344,83 @@ function Get-InstallerPath {
     }
 }
 
+# Function to install SQL Server Management Studio (SSMS)
+function Install-SSMS {
+    <#
+    .SYNOPSIS
+        Installs SQL Server Management Studio (SSMS).
+    #>
+    param (
+        [string]$installerPath
+    )
+
+    $params = "/Install /Quiet"
+
+    Start-Process -FilePath $installerPath -ArgumentList $params -Wait
+    Write-Host "SSMS installation completed." -ForegroundColor Green
+}
+
+# Function to set SQL Server port
+function Set-SQLServerPort {
+    param (
+        [string]$sqlInstanceName,
+        [int]$PortNumber
+    )
+
+    # Function to get SQL Server version
+    function Get-SQLServerVersion {
+        param (
+            [string]$instanceName
+        )
+        $instanceRegPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL"
+        $instanceID = (Get-ItemProperty -Path $instanceRegPath).$instanceName
+        $versionRegPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceID\Setup"
+        $version = (Get-ItemProperty -Path $versionRegPath -Name "Version").Version
+        return $version
+    }
+
+    # Function to get SQL Server service name
+    function Get-SQLServiceName {
+        param (
+            [string]$instanceName
+        )
+        $services = Get-Service | Where-Object { $_.DisplayName -like "*$instanceName*" }
+        foreach ($service in $services) {
+            if ($service.DisplayName -match $instanceName) {
+                return $service.Name
+            }
+        }
+        throw "Service name for instance '$instanceName' not found."
+    }
+
+    # Get the SQL Server version
+    $sqlVersion = Get-SQLServerVersion -instanceName $sqlInstanceName
+
+    # Determine the registry path based on the instance name and version
+    if ($sqlInstanceName -eq "MSSQLSERVER") {
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL$(($sqlVersion -replace '\.', '')).MSSQLSERVER\MSSQLServer\SuperSocketNetLib\Tcp\IPAll"
+    }
+    else {
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL"
+        $instanceID = (Get-ItemProperty -Path $regPath).$sqlInstanceName
+        $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceID\MSSQLServer\SuperSocketNetLib\Tcp\IPAll"
+    }
+
+    # Change the port number and clear dynamic ports in the registry
+    Set-ItemProperty -Path $regPath -Name TcpPort -Value $PortNumber
+    Set-ItemProperty -Path $regPath -Name TcpDynamicPorts -Value ""
+
+    Write-Output "Port number changed to $PortNumber for instance $sqlInstanceName in the registry and dynamic ports cleared."
+
+    # Get the SQL Server service name
+    $serviceName = Get-SQLServiceName -instanceName $sqlInstanceName
+
+    # Restart the SQL Server service to apply changes
+    Restart-Service -Name $serviceName -Force
+
+    Write-Output "SQL Server service $serviceName has been restarted."
+}
+
 # Main script logic
 
 # Ensure running as Administrator and domain connected
@@ -292,30 +438,28 @@ else {
     Write-Host "SQL Server instance $sqlInstanceName does not exist. Proceeding with installation." -ForegroundColor Green
 }
 
-# Check block size for all relevant partitions
+# Check block size for all relevant partitions and create directories if they do not exist
 $partitionsToCheck = @($SQLTEMPDBDIR, $SQLTEMPDBLOGDIR, $SQLUSERDBDIR, $SQLUSERDBLOGDIR)
-$allPartitionsExist = $true
 $installationNotAllowedOnC = $false
 
 foreach ($path in $partitionsToCheck) {
-    if (Test-Path $path) {
-        $driveLetter = (Get-Item -Path $path).PSDrive.Name
-        if ($driveLetter -eq "C") {
-            Write-Host "Installation not allowed on drive C:. Path: $path. Installation aborted." -ForegroundColor Red
-            $installationNotAllowedOnC = $true
-        }
-        elseif (-not (Test-BlockSize -driveLetter $driveLetter)) {
-            Write-Host "Block size check failed for path: $path. Installation aborted." -ForegroundColor Red
-            Exit 1
-        }
+    if (-not (Test-Path $path)) {
+        Write-Host "Path $path does not exist. Creating directory..." -ForegroundColor Yellow
+        New-Item -Path $path -ItemType Directory -Force | Out-Null
     }
-    else {
-        Write-Host "Path $path does not exist. Installation aborted." -ForegroundColor Red
-        $allPartitionsExist = $false
+    
+    $driveLetter = (Get-Item -Path $path).PSDrive.Name
+    if ($driveLetter -eq "C") {
+        Write-Host "Installation not allowed on drive C:. Path: $path. Installation aborted." -ForegroundColor Red
+        $installationNotAllowedOnC = $true
+    }
+    elseif (-not (Test-BlockSize -driveLetter $driveLetter)) {
+        Write-Host "Block size check failed for path: $path. Installation aborted." -ForegroundColor Red
+        Exit 1
     }
 }
 
-if (-not $allPartitionsExist -or $installationNotAllowedOnC) {
+if ($installationNotAllowedOnC) {
     Exit 1
 }
 
@@ -401,5 +545,21 @@ catch {
     Check-InstallationLogs
     Exit 1
 }
+
+# Check if SSMS is already installed
+if ($InstallSSMS -and (Test-SSMSInstalled)) {
+    Write-Host "SQL Server Management Studio (SSMS) is already installed. Installation aborted." -ForegroundColor Red
+    Exit 1
+}
+
+# Install SSMS if requested
+if ($InstallSSMS) {
+    Show-ProgressMessage -Message "Installing SQL Server Management Studio (SSMS)..."
+    Install-SSMS -installerPath $SSMSInstallerPath
+}
+
+# Set the SQL Server port number after installation if needed
+Show-ProgressMessage -Message "Setting SQL Server port number to $PortNumber..."
+Set-SQLServerPort -sqlInstanceName $sqlInstanceName -PortNumber $PortNumber
 
 # End of script
