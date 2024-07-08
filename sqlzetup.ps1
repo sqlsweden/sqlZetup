@@ -60,6 +60,11 @@
     The TCP port number to be used by the SQL Server instance.
 
 .NOTES
+    Author: Michael Pettersson
+    Contact: michael.pettersson@cegal.com
+    Date: 2024-07-08
+    Version: 1.0    
+
     - This script must be run as an administrator.
     - This script only supports machines that are part of a domain.
     - Ensure the provided SQL Server installer path is valid and accessible.
