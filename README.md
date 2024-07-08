@@ -1,3 +1,9 @@
+# ## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 # SQL Server Installation Script
 
 ## Overview
@@ -45,4 +51,4 @@ This repository contains a PowerShell script designed to install a SQL Server in
 
 ```powershell
 .\Install-SQLServer.ps1 -sqlInstanceName "SQL2019_9" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup"
- 
+```
