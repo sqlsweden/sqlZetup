@@ -13,7 +13,6 @@
     - Executes the SQL Server installation with specified parameters.
     - Optionally installs SQL Server Management Studio (SSMS).
     - Verifies the installation and checks for logs in case of errors.
-    - Sets the SQL Server instance port number if specified and verifies it is not already in use.
 
     This script installs SQL Server Developer Edition (2016, 2017, 2019, or 2022) and ensures that the installation directories are configured correctly.
     The script enforces the following conditions:
@@ -56,9 +55,6 @@
 .PARAMETER DebugMode
     Enables detailed logging and verbose output for debugging purposes.
 
-.PARAMETER PortNumber
-    The TCP port number to be used by the SQL Server instance.
-
 .NOTES
     Author: Michael Pettersson
     Contact: michael.pettersson@cegal.com
@@ -76,28 +72,30 @@
     - The block size of the partitions used for installation must be 64 KB.
 
 .EXAMPLE
-    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2022" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -SQLTEMPDBDIR "D:\tempdbdata" -SQLTEMPDBLOGDIR "D:\tempdblog" -SQLUSERDBDIR "E:\userdbdata" -SQLUSERDBLOGDIR "E:\userdblog" -SQLVersion 2022 -InstallSSMS -SSMSInstallerPath "C:\Temp\SSMS-Setup-ENU.exe" -DebugMode $true -PortNumber 1433
+    .\Install-SQLServer.ps1 -sqlInstanceName "SQL2022" -serviceDomainAccount "agdemo\SQLEngine" -sqlInstallerLocalPath "C:\Temp\SQLServerSetup.iso" -SQLSYSADMINACCOUNTS "agdemo\sqlgroup" -SQLTEMPDBDIR "D:\tempdbdata" -SQLTEMPDBLOGDIR "D:\tempdblog" -SQLUSERDBDIR "E:\userdbdata" -SQLUSERDBLOGDIR "E:\userdblog" -SQLVersion 2022 -InstallSSMS -SSMSInstallerPath "C:\Temp\SSMS-Setup-ENU.exe" -DebugMode $true
 
-    This example installs a SQL Server 2022 Developer Edition instance named "SQL2022" using the specified domain account and ISO file, adds the specified sysadmin accounts, sets the directories for TEMPDB and user databases, installs SSMS, enables debugging mode, and sets the TCP port number to 1433.
+    This example installs a SQL Server 2022 Developer Edition instance named "SQL2022" using the specified domain account and ISO file, adds the specified sysadmin accounts, sets the directories for TEMPDB and user databases, installs SSMS, enables debugging mode.
 #>
 
 # Configurable parameters
 param(
-    [string]$sqlInstanceName = "SQL2022_9", # Set the SQL Server instance name
+    [string]$sqlInstanceName = "mssqlserver_4", # Set the SQL Server instance name
     [string]$serviceDomainAccount = "agdemo\SQLEngine", # Set the domain account for SQL Server service
     [string]$sqlInstallerLocalPath = "C:\Temp\sqlsetup\SQLServer2022-x64-ENU-Dev.iso", # Set the local path to the SQL Server installer ISO or EXE
     [string]$SQLSYSADMINACCOUNTS = "agdemo\sqlgroup", # Set the domain accounts to be added as sysadmins
-    [string]$SQLTEMPDBDIR = "e:\tempdbdata9", # Set the directory for SQL TEMPDB data files
-    [string]$SQLTEMPDBLOGDIR = "e:\tempdblog9", # Set the directory for SQL TEMPDB log files
+    [string]$SQLTEMPDBDIR = "e:\tempdbdata4", # Set the directory for SQL TEMPDB data files
+    [string]$SQLTEMPDBLOGDIR = "e:\tempdblog4", # Set the directory for SQL TEMPDB log files
     [string]$SQLUSERDBDIR = "e:\userdbdata", # Set the directory for SQL user database data files
     [string]$SQLUSERDBLOGDIR = "e:\userdblog", # Set the directory for SQL user database log files
     [ValidateSet("2016", "2017", "2019", "2022")]
     [string]$SQLVersion = "2022", # Set the SQL Server version
-    [switch]$InstallSSMS = $true, # Install SQL Server Management Studio
+    [switch]$InstallSSMS = $false, # Install SQL Server Management Studio
     [string]$SSMSInstallerPath = "C:\Temp\sqlsetup\SSMS-Setup-ENU.exe", # Set the local path to the SSMS installer EXE
-    [switch]$DebugMode = $False, # Enable debugging mode
-    [int]$PortNumber = 1933 # Set the TCP port number
+    [switch]$DebugMode = $False # Enable debugging mode
 )
+
+# Define the path for the restart marker file
+$RestartMarkerFilePath = "C:\Temp\SQLInstallRestartMarker.txt"
 
 # Function to check if SSMS is installed
 function Test-SSMSInstalled {
@@ -144,20 +142,6 @@ function Test-BlockSize {
         return $false
     }
     return $true
-}
-
-# Function to check if a port is already in use
-function Test-PortInUse {
-    param (
-        [int]$port
-    )
-
-    $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-    if ($connections) {
-        Write-Host "Port $port is already in use." -ForegroundColor Red
-        return $true
-    }
-    return $false
 }
 
 # Set verbose preference based on DebugMode
@@ -365,65 +349,63 @@ function Install-SSMS {
     Write-Host "SSMS installation completed." -ForegroundColor Green
 }
 
-# Function to set SQL Server port
-function Set-SQLServerPort {
-    param (
-        [string]$sqlInstanceName,
-        [int]$PortNumber
-    )
-
-    # Function to get SQL Server version
-    function Get-SQLServerVersion {
-        param (
-            [string]$instanceName
-        )
-        $instanceRegPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL"
-        $instanceID = (Get-ItemProperty -Path $instanceRegPath).$instanceName
-        $versionRegPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceID\Setup"
-        $version = (Get-ItemProperty -Path $versionRegPath -Name "Version").Version
-        return $version
-    }
-
-    # Function to get SQL Server service name
-    function Get-SQLServiceName {
-        param (
-            [string]$instanceName
-        )
-        $services = Get-Service | Where-Object { $_.DisplayName -like "*$instanceName*" }
-        foreach ($service in $services) {
-            if ($service.DisplayName -match $instanceName) {
-                return $service.Name
-            }
-        }
-        throw "Service name for instance '$instanceName' not found."
-    }
-
-    # Get the SQL Server version
-    $sqlVersion = Get-SQLServerVersion -instanceName $sqlInstanceName
-
-    # Determine the registry path based on the instance name and version
-    if ($sqlInstanceName -eq "MSSQLSERVER") {
-        $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL$(($sqlVersion -replace '\.', '')).MSSQLSERVER\MSSQLServer\SuperSocketNetLib\Tcp\IPAll"
+# Function to prompt the user for restart approval
+function Prompt-Restart {
+    <#
+    .SYNOPSIS
+        Prompts the user for approval to restart the machine.
+    .DESCRIPTION
+        This function asks the user if they want to restart the machine now.
+    .OUTPUTS
+        [bool] $true if the user approves the restart, $false otherwise.
+    #>
+    $response = Read-Host "The machine needs to restart to ensure all locked files are released and any pending reboots are processed. Do you want to restart now? (Y/N)"
+    if ($response -match '^[Yy]$') {
+        return $true
     }
     else {
-        $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL"
-        $instanceID = (Get-ItemProperty -Path $regPath).$sqlInstanceName
-        $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceID\MSSQLServer\SuperSocketNetLib\Tcp\IPAll"
+        return $false
     }
+}
 
-    # Change the port number and clear dynamic ports in the registry
-    Set-ItemProperty -Path $regPath -Name TcpPort -Value $PortNumber
-    Set-ItemProperty -Path $regPath -Name TcpDynamicPorts -Value ""
-
-    Write-Output "Port number changed to $PortNumber for instance $sqlInstanceName in the registry and dynamic ports cleared."
-
-    # Get the SQL Server service name
-    $serviceName = Get-SQLServiceName -instanceName $sqlInstanceName
-
-    # Restart the SQL Server service to apply changes
-    Restart-Service -Name $serviceName -Force
-
-    Write-Output "SQL Server service $serviceName has been restarted."
+# Function to check for pending reboots
+function Test-PendingReboot {
+    $RebootRequired = $false
+    
+    # Check the registry key for the RebootRequired flag
+    $RebootRequiredKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+    if (Test-Path $RebootRequiredKey) {
+        Write-Host "Reboot is required: Component Based Servicing" -ForegroundColor Yellow
+        $RebootRequired = $true
+    }
+    
+    # Check the registry key for the PendingFileRenameOperations flag
+    $PendingFileRenameOperationsKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations'
+    if (Test-Path $PendingFileRenameOperationsKey) {
+        Write-Host "Reboot is required: Pending File Rename Operations" -ForegroundColor Yellow
+        $RebootRequired = $true
+    }
+    
+    # Check the registry key for the UpdateExeVolatile flag
+    $UpdateExeVolatileKey = 'HKLM:\SOFTWARE\Microsoft\Updates\UpdateExeVolatile'
+    if (Test-Path $UpdateExeVolatileKey) {
+        $UpdateExeVolatileValue = Get-ItemProperty -Path $UpdateExeVolatileKey
+        if ($UpdateExeVolatileValue.UpdateExeVolatile -ne 0) {
+            Write-Host "Reboot is required: UpdateExeVolatile" -ForegroundColor Yellow
+            $RebootRequired = $true
+        }
+    }
+    
+    # Check the registry key for the PendingComputerRename flag
+    $ComputerRenameKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName'
+    $ComputerRenameFlagKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName'
+    $PendingComputerRename = (Get-ItemProperty -Path $ComputerRenameKey).ComputerName -ne (Get-ItemProperty -Path $ComputerRenameFlagKey).ComputerName
+    if ($PendingComputerRename) {
+        Write-Host "Reboot is required: Computer Rename" -ForegroundColor Yellow
+        $RebootRequired = $true
+    }
+    
+    return $RebootRequired
 }
 
 # Main script logic
@@ -431,6 +413,25 @@ function Set-SQLServerPort {
 # Ensure running as Administrator and domain connected
 Test-Administrator
 Test-DomainConnection
+
+# Check if the restart marker file exists
+if (Test-Path $RestartMarkerFilePath) {
+    Write-Host "Restart marker file found. Skipping restart and continuing with the script." -ForegroundColor Green
+}
+else {
+    # Prompt the user for restart approval
+    if (Prompt-Restart) {
+        # Create the marker file
+        New-Item -Path $RestartMarkerFilePath -ItemType File -Force | Out-Null
+        
+        # Restart the machine
+        Shutdown.exe /r /t 0
+    }
+    else {
+        Write-Host "User did not approve the restart. Exiting script." -ForegroundColor Yellow
+        Exit 1
+    }
+}
 
 # Check if the SQL Server instance already exists
 $instanceExists = Test-SqlInstanceExists -instanceName $sqlInstanceName
@@ -563,8 +564,12 @@ if ($InstallSSMS) {
     Install-SSMS -installerPath $SSMSInstallerPath
 }
 
-# Set the SQL Server port number after installation if needed
-Show-ProgressMessage -Message "Setting SQL Server port number to $PortNumber..."
-Set-SQLServerPort -sqlInstanceName $sqlInstanceName -PortNumber $PortNumber
+# Check for pending reboot
+if (Test-PendingReboot) {
+    Write-Host "A reboot is pending." -ForegroundColor Red
+}
+else {
+    Write-Host "No reboot is pending." -ForegroundColor Green
+}
 
 # End of script
