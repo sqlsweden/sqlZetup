@@ -1,0 +1,42 @@
+name: SQL Server Installation Test
+
+on:
+  push:
+    branches:
+      - developer
+      - staging
+      - main
+  pull_request:
+    branches:
+      - developer
+      - staging
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Setup PowerShell
+      uses: actions/setup-powershell@v2
+      with:
+        pwsh-version: '7.x'
+
+    - name: Download SQL Server Installer
+      run: |
+        Invoke-WebRequest -Uri "https://yourdomain.com/path/to/sql_server_installer.exe" -OutFile "sql_server_installer.exe"
+
+    - name: Install SQL Server with PID
+      run: |
+        $pid = "YOUR_PRODUCT_ID"
+        Start-Process -FilePath "sql_server_installer.exe" -ArgumentList "/qs", "/ACTION=Install", "/FEATURES=SQL", "/INSTANCENAME=MSSQLSERVER", "/PID=$pid", "/SQLSVCACCOUNT='NT AUTHORITY\SYSTEM'", "/SQLSYSADMINACCOUNTS='BUILTIN\ADMINISTRATORS'", "/IACCEPTSQLSERVERLICENSETERMS" -Wait
+
+    - name: Install Pester
+      run: Install-Module -Name Pester -Force -SkipPublisherCheck
+
+    - name: Run Pester Tests
+      run: Invoke-Pester -Path ./YourScript.Tests.ps1
