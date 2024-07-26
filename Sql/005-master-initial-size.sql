@@ -1,0 +1,4 @@
+ALTER DATABASE [master] MODIFY FILE ( NAME = N'master', SIZE = 131072KB )
+GO
+ALTER DATABASE [master] MODIFY FILE ( NAME = N'mastlog', SIZE = 65536KB )
+GO

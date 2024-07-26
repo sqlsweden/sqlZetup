@@ -1,0 +1,7 @@
+Master:001-MaintenanceSolution.sql
+Msdb:002-MaintenanceSolutionAgentJobs.sql
+Master:003-vCommandLog.sql
+Msdb:004-msdb_missing_indexes.sql
+Master:005-master-initial-size.sql
+Master:006-msdb-initial-size.sql
+Master:007-model-initial-size.sql

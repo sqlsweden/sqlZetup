@@ -1,6 +1,3 @@
-USE [msdb]
-GO
-
 
 BEGIN TRANSACTION
 DECLARE @ReturnCode INT

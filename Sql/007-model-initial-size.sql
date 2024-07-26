@@ -1,0 +1,4 @@
+ALTER DATABASE [model] MODIFY FILE ( NAME = N'modeldev', SIZE = 65536KB )
+GO
+ALTER DATABASE [model] MODIFY FILE ( NAME = N'modellog', SIZE = 65536KB )
+GO
