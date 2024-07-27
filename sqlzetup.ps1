@@ -16,10 +16,16 @@ $config = @{
     TcpEnabled            = 1
     SqlSvcAccount         = "agdemo\sqlengine"
     SqlSvcPassword        = $null
-    AgtSvcAccount         = "agdemo\SqlAgent"
+    AgtSvcAccount         = $null #"agdemo\sqlagent"
     AgtSvcPassword        = $null
     SaPwd                 = $null
 }
+
+# Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
+if ($null -eq $config.AgtSvcAccount) {
+    $config.AgtSvcAccount = $config.SqlSvcAccount
+}
+
 $script:ssmsInstallerPath = "C:\Temp\sqlzetup\SSMS-Setup-ENU.exe"
 
 # Function to show progress messages
@@ -82,8 +88,15 @@ function Get-SecurePasswords {
     $global:saPassword = Read-Host -AsSecureString -Prompt "Enter the SA password"
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
     $global:sqlServiceAccountPassword = Read-Host -AsSecureString -Prompt "Enter the password for the SQL Server service account"
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
-    $global:sqlAgentServiceAccountPassword = Read-Host -AsSecureString -Prompt "Enter the password for the SQL Server Agent service account"
+
+    # Only prompt for Agent password if different from SqlSvcAccount
+    if ($config.SqlSvcAccount -ne $config.AgtSvcAccount) {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
+        $global:sqlAgentServiceAccountPassword = Read-Host -AsSecureString -Prompt "Enter the password for the SQL Server Agent service account"
+    }
+    else {
+        $global:sqlAgentServiceAccountPassword = $global:sqlServiceAccountPassword
+    }
 }
 
 # Function to create PSCredential objects
@@ -91,9 +104,9 @@ function New-SqlCredentials {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
     $global:saCredential = New-Object System.Management.Automation.PSCredential -ArgumentList "sa", $saPassword
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
-    $global:sqlServiceCredential = New-Object System.Management.Automation.PSCredential -ArgumentList "agdemo\sqlengine", $sqlServiceAccountPassword
+    $global:sqlServiceCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $config.SqlSvcAccount, $sqlServiceAccountPassword
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
-    $global:sqlAgentCredential = New-Object System.Management.Automation.PSCredential -ArgumentList "agdemo\SqlAgent", $sqlAgentServiceAccountPassword
+    $global:sqlAgentCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $config.AgtSvcAccount, $sqlAgentServiceAccountPassword
 }
 
 # Prompt for input of passwords
@@ -647,3 +660,4 @@ if ($agentServiceStatus -and $agentServiceStatus.Status -ne 'Running') {
 
 Write-Host "SQL Server installation and configuration completed successfully." -ForegroundColor Green
 if ($debugMode) { Write-Debug "SQL Server installation and configuration completed successfully on server $server" }
+
