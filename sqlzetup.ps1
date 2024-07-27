@@ -1,39 +1,35 @@
 # Configuration Variables
 [string]$server = $env:COMPUTERNAME
-[string]$edition = "Developer" # Options: Developer, Standard, Enterprise
+[string]$edition = "Developer"
 [string]$productKey = $null
-[bool]$InstallSSMS = $true
-[bool]$DebugMode = $true
-[string]$sqlInstallerLocalPath = "C:\Temp\sqlzetup\SQLServer2022-x64-ENU-Dev.iso"  # Update this path to your ISO or EXE file
+[bool]$installSsms = $true
+[bool]$debugMode = $false
+[string]$sqlInstallerLocalPath = "C:\Temp\sqlzetup\SQLServer2022-x64-ENU-Dev.iso"
 [string]$tableName = "CommandLog"
 
 # Configuration for paths
 $config = @{
-    SQLTEMPDBLOGDIR        = "e:\mssql\tempdblog"
-    SQLTEMPDBDIR           = "e:\mssql\tempdbdata"
-    BROWSERSVCSTARTUPTYPE  = "Disabled"
-    SQLTEMPDBFILESIZE      = 8 # 1024 MB is max (for each file)
-    SQLTEMPDBFILEGROWTH    = 64 # 1024 MB is max (for each file)
-    SQLTEMPDBLOGFILESIZE   = 8 # 1024 MB is max (for each file)
-    SQLTEMPDBLOGFILEGROWTH = 64 # 1024 MB is max (for each file)
-    NPENABLED              = 0
-    TCPENABLED             = 1
-    SQLSVCACCOUNT          = "agdemo\sqlengine"
-    SQLSVCPASSWORD         = $null
-    AGTSVCACCOUNT          = "agdemo\SqlAgent"
-    AGTSVCPASSWORD         = $null
-    SAPWD                  = $null
+    SqlTempDbLogDir       = "F:\MSSQL\Log"
+    SqlTempDbDir          = "G:\MSSQL\Data"
+    BrowserSvcStartupType = "Disabled"
+    NpEnabled             = 0
+    TcpEnabled            = 1
+    SqlSvcAccount         = "agdemo\sqlengine"
+    SqlSvcPassword        = $null
+    AgtSvcAccount         = "agdemo\SqlAgent"
+    AgtSvcPassword        = $null
+    SaPwd                 = $null
 }
-$script:SSMSInstallerPath = "C:\Temp\sqlzetup\SSMS-Setup-ENU.exe"
+$script:ssmsInstallerPath = "C:\Temp\sqlzetup\SSMS-Setup-ENU.exe"
 
 # Function to show progress messages
 function Show-ProgressMessage {
     param (
-        [string]$Message
+        [string]$message
     )
-    Write-Host "$Message"
-    if ($DebugMode) {
-        Write-Debug "$Message"
+    Write-Host "$message"
+    if ($debugMode) {
+        Write-Debug "$message"
     }
 }
 
@@ -50,7 +46,7 @@ function Test-VolumeBlockSize {
         $blockSize = Get-WmiObject -Query "SELECT BlockSize FROM Win32_Volume WHERE DriveLetter = '$drive'" | Select-Object -ExpandProperty BlockSize
         if ($blockSize -ne 65536) {
             Write-Host "Volume $drive does not use a 64 KB block size." -ForegroundColor Red
-            if ($DebugMode) { Write-Debug "BlockSize for volume $drive is $blockSize instead of 65536." }
+            if ($debugMode) { Write-Debug "BlockSize for volume $drive is $blockSize instead of 65536." }
             $blockSizeOK = $false
         }
         else {
@@ -63,19 +59,19 @@ function Test-VolumeBlockSize {
 
 # Check block size of specified volumes before installation
 $volumePaths = @(
-    $config.SQLTEMPDBLOGDIR,
-    $config.SQLTEMPDBDIR,
-    "e:\mssql\data",
-    "e:\mssql\log",
-    "e:\mssql\backup"
+    $config.SqlTempDbLogDir,
+    $config.SqlTempDbDir,
+    "E:\MSSQL\Data",
+    "F:\MSSQL\Log",
+    "H:\MSSQL\Backup"
 )
 
-Show-ProgressMessage -Message "Verifying volume block sizes..."
+Show-ProgressMessage -message "Verifying volume block sizes..."
 if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
     $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
     if ($userInput -ne 'Y') {
         Write-Host "Installation cancelled by user." -ForegroundColor Red
-        if ($DebugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
+        if ($debugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
         Exit 1
     }
 }
@@ -101,13 +97,20 @@ function New-SqlCredentials {
 }
 
 # Prompt for input of passwords
-Show-ProgressMessage -Message "Prompting for input of passwords..."
-Get-SecurePasswords
-New-SqlCredentials
+Show-ProgressMessage -message "Prompting for input of passwords..."
+try {
+    Get-SecurePasswords
+    New-SqlCredentials
+}
+catch {
+    Write-Host "Failed to prompt for input of passwords." -ForegroundColor Red
+    Write-Host "Error details: $_"
+    Exit 1
+}
 
-$config.SQLSVCPASSWORD = $sqlServiceCredential.GetNetworkCredential().Password
-$config.AGTSVCPASSWORD = $sqlAgentCredential.GetNetworkCredential().Password
-$config.SAPWD = $saCredential.GetNetworkCredential().Password
+$config.SqlSvcPassword = $sqlServiceCredential.GetNetworkCredential().Password
+$config.AgtSvcPassword = $sqlAgentCredential.GetNetworkCredential().Password
+$config.SaPwd = $saCredential.GetNetworkCredential().Password
 
 # Function to mount ISO and get setup.exe path
 function Mount-IsoAndGetSetupPath {
@@ -117,18 +120,22 @@ function Mount-IsoAndGetSetupPath {
 
     if (-Not (Test-Path -Path $isoPath)) {
         Write-Host "ISO file not found at path: $isoPath" -ForegroundColor Red
-        if ($DebugMode) { Write-Debug "ISO file not found at path: $isoPath" }
+        if ($debugMode) { Write-Debug "ISO file not found at path: $isoPath" }
         Exit 1
     }
 
-    $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru
-    $driveLetter = ($mountResult | Get-Volume).DriveLetter
-    $setupPath = "$($driveLetter):\setup.exe"
-
-    Write-Verbose "Mounted ISO at $driveLetter and found setup.exe at $setupPath"
-    if ($DebugMode) { Write-Debug "Mounted ISO at $driveLetter and found setup.exe at $setupPath" }
-
-    return $setupPath, $driveLetter
+    try {
+        $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        $setupPath = "$($driveLetter):\setup.exe"
+        if ($debugMode) { Write-Debug "Mounted ISO at $driveLetter and found setup.exe at $setupPath" }
+        return $setupPath, $driveLetter
+    }
+    catch {
+        Write-Host "Failed to mount ISO and get setup.exe path." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        Exit 1
+    }
 }
 
 # Function to unmount ISO
@@ -137,11 +144,16 @@ function Dismount-Iso {
         [string]$isoPath
     )
 
-    $diskImage = Get-DiskImage -ImagePath $isoPath
-    Dismount-DiskImage -ImagePath $diskImage.ImagePath
-
-    Write-Verbose "Unmounted ISO at $($diskImage.DevicePath)"
-    if ($DebugMode) { Write-Debug "Unmounted ISO at $($diskImage.DevicePath)" }
+    try {
+        $diskImage = Get-DiskImage -ImagePath $isoPath
+        Dismount-DiskImage -ImagePath $diskImage.ImagePath
+        if ($debugMode) { Write-Debug "Unmounted ISO at $($diskImage.DevicePath)" }
+    }
+    catch {
+        Write-Host "Failed to unmount ISO." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        Exit 1
+    }
 }
 
 # Function to determine installer path based on file type
@@ -152,8 +164,7 @@ function Get-InstallerPath {
 
     $fileExtension = [System.IO.Path]::GetExtension($installerPath).ToLower()
 
-    Write-Verbose "Installer file extension: $fileExtension"
-    if ($DebugMode) { Write-Debug "Installer file extension: $fileExtension" }
+    if ($debugMode) { Write-Debug "Installer file extension: $fileExtension" }
 
     if ($fileExtension -eq ".iso") {
         return Mount-IsoAndGetSetupPath -isoPath $installerPath
@@ -163,17 +174,24 @@ function Get-InstallerPath {
     }
     else {
         Write-Host "Unsupported file type: $fileExtension. Please provide a path to an .iso or .exe file." -ForegroundColor Red
-        if ($DebugMode) { Write-Debug "Unsupported file type: $fileExtension" }
+        if ($debugMode) { Write-Debug "Unsupported file type: $fileExtension" }
         Exit 1
     }
 }
 
-$installerDetails = Get-InstallerPath -installerPath $sqlInstallerLocalPath
-$installerPath = $installerDetails[0]
-$driveLetter = $installerDetails[1]
+try {
+    $installerDetails = Get-InstallerPath -installerPath $sqlInstallerLocalPath
+    $installerPath = $installerDetails[0]
+    $driveLetter = $installerDetails[1]
+}
+catch {
+    Write-Host "Failed to determine installer path." -ForegroundColor Red
+    Write-Host "Error details: $_"
+    Exit 1
+}
 
 # Function to get SQL Server version from the installer
-function Get-SQLVersion {
+function Get-SqlVersion {
     param (
         [string]$installerPath
     )
@@ -184,7 +202,7 @@ function Get-SQLVersion {
     }
     else {
         Write-Host "Installer not found at $installerPath" -ForegroundColor Red
-        if ($DebugMode) { Write-Debug "Installer not found at $installerPath" }
+        if ($debugMode) { Write-Debug "Installer not found at $installerPath" }
         Exit 1
     }
 }
@@ -202,26 +220,33 @@ function Get-UpdateDirectory {
         '16' { return "2022" }
         default { 
             Write-Host "Unsupported SQL Server version: $version" -ForegroundColor Red
-            if ($DebugMode) { Write-Debug "Unsupported SQL Server version: $version" }
+            if ($debugMode) { Write-Debug "Unsupported SQL Server version: $version" }
             throw "Unsupported SQL Server version: $version" 
         }
     }
 }
 
-$sqlVersion = Get-SQLVersion -installerPath $installerPath
-$updateDirectory = Get-UpdateDirectory -version $sqlVersion
-$updateSourcePath = "C:\Temp\sqlzetup\Updates\$updateDirectory"
+try {
+    $sqlVersion = Get-SqlVersion -installerPath $installerPath
+    $updateDirectory = Get-UpdateDirectory -version $sqlVersion
+    $updateSourcePath = "C:\Temp\sqlzetup\Updates\$updateDirectory"
+}
+catch {
+    Write-Host "Failed to get SQL Server version or update directory." -ForegroundColor Red
+    Write-Host "Error details: $_"
+    Exit 1
+}
 
-$installparams = @{
+$installParams = @{
     SqlInstance                   = $server
     Version                       = 2022
-    Verbose                       = $true
+    Verbose                       = $false
     Confirm                       = $false
     Feature                       = "Engine"
-    InstancePath                  = "C:\mssql"
-    DataPath                      = "e:\mssql\data"
-    LogPath                       = "e:\mssql\log"
-    BackupPath                    = "e:\mssql\backup"
+    InstancePath                  = "C:\Program Files\Microsoft SQL Server"
+    DataPath                      = "E:\MSSQL\Data"
+    LogPath                       = "F:\MSSQL\Log"
+    BackupPath                    = "H:\MSSQL\Backup"
     Path                          = "${driveLetter}:\"
     InstanceName                  = "MSSQLSERVER"
     AgentCredential               = $sqlAgentCredential
@@ -240,21 +265,55 @@ $installparams = @{
 if ($edition -ne "Developer") {
     if ($null -eq $productKey) {
         Write-Host "Product key is required for Standard and Enterprise editions." -ForegroundColor Red
-        if ($DebugMode) { Write-Debug "Product key is required for Standard and Enterprise editions." }
-        throw "Product key is required for Standard and Enterprise editions."
+        if ($debugMode) { Write-Debug "Product key is required for Standard and Enterprise editions." }
+        Exit 1
     }
-    $installparams.PID = $productKey
+    $installParams.Pid = $productKey
 }
 
 # Set verbose preference based on DebugMode
-if ($DebugMode) {
+if ($debugMode) {
     $VerbosePreference = "Continue"
+}
+else {
+    $VerbosePreference = "SilentlyContinue"
+}
+
+# Disable verbose output for dbatools cmdlets
+$global:PSDefaultParameterValues = @{"*:Verbose" = $false }
+
+# Function to check for reboot requirement
+function Check-RebootRequirement {
+    param (
+        [string]$warnings
+    )
+
+    if ($warnings -like "*reboot*") {
+        Write-Host "SQL Server installation requires a reboot." -ForegroundColor Red
+        if ($debugMode) { Write-Debug "SQL Server installation requires a reboot." }
+        
+        try {
+            $userInput = Read-Host "SQL Server installation requires a reboot. Do you want to reboot now? (Y/N)"
+            if ($userInput -eq 'Y') {
+                Restart-Computer -Force
+            }
+            else {
+                Write-Host "Please reboot the computer manually to complete the installation." -ForegroundColor Yellow
+                Exit 1
+            }
+        }
+        catch {
+            Write-Host "An error occurred while attempting to prompt for a reboot." -ForegroundColor Red
+            if ($debugMode) { Write-Debug "Error details: $_" }
+            Exit 1
+        }
+    }
 }
 
 # Function to check if SSMS is installed
-function Test-SSMSInstalled {
+function Test-SsmsInstalled {
     param (
-        [string]$SSMSVersion = "18"
+        [string]$ssmsVersion = "18"
     )
 
     $registryPaths = @(
@@ -269,7 +328,7 @@ function Test-SSMSInstalled {
         
         if ($installedPrograms) {
             Write-Host "SSMS is installed:"
-            if ($DebugMode) { Write-Debug "SSMS installed programs found in registry path: $registryPath" }
+            if ($debugMode) { Write-Debug "SSMS installed programs found in registry path: $registryPath" }
             foreach ($program in $installedPrograms) {
                 Write-Host "Name: $($program.DisplayName)"
                 Write-Host "Version: $($program.DisplayVersion)"
@@ -279,62 +338,79 @@ function Test-SSMSInstalled {
     }
     
     Write-Host "SSMS is not installed."
-    if ($DebugMode) { Write-Debug "SSMS is not installed in any of the checked registry paths." }
+    if ($debugMode) { Write-Debug "SSMS is not installed in any of the checked registry paths." }
     return $false
 }
 
 # Function to install SQL Server Management Studio (SSMS)
-function Install-SSMS {
+function Install-Ssms {
     param (
         [string]$installerPath
     )
 
     $params = "/Install /Quiet"
 
-    Start-Process -FilePath $installerPath -ArgumentList $params -Wait
-    Write-Host "SSMS installation completed." -ForegroundColor Green
-    if ($DebugMode) { Write-Debug "SSMS installation completed using installer path: $installerPath" }
+    try {
+        Start-Process -FilePath $installerPath -ArgumentList $params -Wait
+        Write-Host "SSMS installation completed." -ForegroundColor Green
+        if ($debugMode) { Write-Debug "SSMS installation completed using installer path: $installerPath" }
+    }
+    catch {
+        Write-Host "SSMS installation failed." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        Exit 1
+    }
 }
 
-# Set installer path
-Show-ProgressMessage -Message "Determining installer path..."
-Show-ProgressMessage -Message "Installer path determined: $installerPath"
+# Function to verify if updates were applied
+function Test-UpdatesApplied {
+    param (
+        [string]$updateSourcePath
+    )
 
-Show-ProgressMessage -Message "Starting SQL Server installation..."
+    $updateFiles = Get-ChildItem -Path $updateSourcePath -Filter *.exe
+    if ($updateFiles.Count -eq 0) {
+        Write-Host "No update files found in ${updateSourcePath}" -ForegroundColor Yellow
+        if ($debugMode) { Write-Debug "No update files found in ${updateSourcePath}" }
+    }
+    else {
+        Write-Host "Update files found in ${updateSourcePath}:"
+        foreach ($file in $updateFiles) {
+            Write-Host "Update: $($file.Name)"
+            if ($debugMode) { Write-Debug "Update file found: $($file.Name)" }
+        }
+    }
+}
+
+# Proceed with your script
+Show-ProgressMessage -message "Determining installer path..."
+Show-ProgressMessage -message "Installer path determined: $installerPath"
+
+Show-ProgressMessage -message "Starting SQL Server installation..."
 try {
     Invoke-Command {
-        Install-DbaInstance @installparams
-    } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning
+        Install-DbaInstance @installParams
+    } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false
 }
 catch {
     Write-Host "SQL Server installation failed with an error. Exiting script." -ForegroundColor Red
     Write-Host "Error Details: $_"
-    if ($DebugMode) { Write-Debug "SQL Server installation failed. Error details: $_" }
+    if ($debugMode) { Write-Debug "SQL Server installation failed. Error details: $_" }
     Exit 1
 }
 
-# Output captured information for troubleshooting
-Write-Host "Installation Output:"
-$installOutput
-Write-Host "Installation Errors:"
-$installError
-Write-Host "Installation Warnings:"
-$installWarning
+# Capture and suppress detailed output, only show if debugMode is enabled
+if ($debugMode) {
+    Write-Host "Installation Output:"
+    $installOutput
+    Write-Host "Installation Errors:"
+    $installError
+    Write-Host "Installation Warnings:"
+    $installWarning
+}
 
 # Check install warning for a reboot requirement message
-if ($installWarning -like "*reboot*") {
-    Write-Host "SQL Server installation requires a reboot." -ForegroundColor Red
-    if ($DebugMode) { Write-Debug "SQL Server installation requires a reboot." }
-    
-    $userInput = Read-Host "SQL Server installation requires a reboot. Do you want to reboot now? (Y/N)"
-    if ($userInput -eq 'Y') {
-        Restart-Computer -Force
-    }
-    else {
-        Write-Host "Please reboot the computer manually to complete the installation." -ForegroundColor Yellow
-        Exit 1
-    }
-}
+Check-RebootRequirement -warnings $installWarning
 
 # Unmount ISO if it was used
 if ([System.IO.Path]::GetExtension($sqlInstallerLocalPath).ToLower() -eq ".iso") {
@@ -364,17 +440,19 @@ foreach ($entry in $orderList) {
             # Execute the SQL script against the specified database
             Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent
             Write-Output "Successfully executed script: $fileName on database: $databaseName"
-            if ($DebugMode) { Write-Debug "Successfully executed script: $fileName on database: $databaseName" }
+            if ($debugMode) { Write-Debug "Successfully executed script: $fileName on database: $databaseName" }
         }
         catch {
             Write-Output "Failed to execute script: $fileName on database: $databaseName"
             Write-Output $_.Exception.Message
-            if ($DebugMode) { Write-Debug "Failed to execute script: $fileName on database: $databaseName. Error: $_" }
+            if ($debugMode) { Write-Debug "Failed to execute script: $fileName on database: $databaseName. Error: $_" }
+            Exit 1
         }
     }
     else {
         Write-Output "File not found: $fileName"
-        if ($DebugMode) { Write-Debug "File not found: $fileName in path: $filePath" }
+        if ($debugMode) { Write-Debug "File not found: $fileName in path: $filePath" }
+        Exit 1
     }
 }
 
@@ -418,6 +496,7 @@ function Test-SqlExecution {
     catch {
         Write-Host "An error occurred during the verification query execution." -ForegroundColor Red
         Write-Host $_.Exception.Message
+        Exit 1
     }
 }
 
@@ -433,106 +512,138 @@ BEGIN
 END
 "@
 
-Show-ProgressMessage -Message "Verifying SQL script execution..."
+Show-ProgressMessage -message "Verifying SQL script execution..."
 Test-SqlExecution -serverInstance $server -databaseName "master" -query $verificationQuery
 
 # Additional Configuration Steps
-Show-ProgressMessage -Message "Starting additional configuration steps..."
+Show-ProgressMessage -message "Starting additional configuration steps..."
 
 # Log each configuration step with verbose and debug output
-Show-ProgressMessage -Message "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections..."
+Show-ProgressMessage -message "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections..."
 Get-DbaSpConfigure -SqlInstance $server -Name 'backup compression default', 'optimize for ad hoc workloads', 'remote admin connections' |
 ForEach-Object {
-    Write-Verbose "Setting $($_.Name) to 1"
     Set-DbaSpConfigure -SqlInstance $server -Name $_.Name -Value 1
-    if ($DebugMode) { Write-Debug "Configured $($_.Name) to 1 on server $server" }
+    if ($debugMode) { Write-Debug "Configured $($_.Name) to 1 on server $server" }
 }
 
-Show-ProgressMessage -Message "Setting cost threshold for parallelism..."
+Show-ProgressMessage -message "Setting cost threshold for parallelism..."
 Set-DbaSpConfigure -SqlInstance $server -Name 'cost threshold for parallelism' -Value 75
-if ($DebugMode) { Write-Debug "Set 'cost threshold for parallelism' to 75 on server $server" }
+if ($debugMode) { Write-Debug "Set 'cost threshold for parallelism' to 75 on server $server" }
 
-Show-ProgressMessage -Message "Setting recovery interval (min)..."
+Show-ProgressMessage -message "Setting recovery interval (min)..."
 Set-DbaSpConfigure -SqlInstance $server -Name 'recovery interval (min)' -Value 60
-if ($DebugMode) { Write-Debug "Set 'recovery interval (min)' to 60 on server $server" }
+if ($debugMode) { Write-Debug "Set 'recovery interval (min)' to 60 on server $server" }
 
-Show-ProgressMessage -Message "Configuring startup parameter for TraceFlag 3226..."
+Show-ProgressMessage -message "Configuring startup parameter for TraceFlag 3226..."
 Set-DbaStartupParameter -SqlInstance $server -TraceFlag 3226 -Confirm:$false
-if ($DebugMode) { Write-Debug "Configured startup parameter TraceFlag 3226 on server $server" }
+if ($debugMode) { Write-Debug "Configured startup parameter TraceFlag 3226 on server $server" }
 
-Show-ProgressMessage -Message "Setting max memory..."
+Show-ProgressMessage -message "Setting max memory..."
 Set-DbaMaxMemory -SqlInstance $server
-if ($DebugMode) { Write-Debug "Set max memory on server $server" }
+if ($debugMode) { Write-Debug "Set max memory on server $server" }
 
-Show-ProgressMessage -Message "Setting max degree of parallelism..."
+Show-ProgressMessage -message "Setting max degree of parallelism..."
 Set-DbaMaxDop -SqlInstance $server
-if ($DebugMode) { Write-Debug "Set max degree of parallelism on server $server" }
+if ($debugMode) { Write-Debug "Set max degree of parallelism on server $server" }
 
-Show-ProgressMessage -Message "Configuring power plan..."
+Show-ProgressMessage -message "Configuring power plan..."
 Set-DbaPowerPlan -ComputerName $server
-if ($DebugMode) { Write-Debug "Configured power plan on server $server" }
+if ($debugMode) { Write-Debug "Configured power plan on server $server" }
 
-Show-ProgressMessage -Message "Configuring error log settings..."
+Show-ProgressMessage -message "Configuring error log settings..."
 Set-DbaErrorLogConfig -SqlInstance $server -LogCount 60 -LogSize 500
-if ($DebugMode) { Write-Debug "Configured error log settings (LogCount: 60, LogSize: 500MB) on server $server" }
+if ($debugMode) { Write-Debug "Configured error log settings (LogCount: 60, LogSize: 500MB) on server $server" }
 
-Show-ProgressMessage -Message "Configuring database file growth settings for 'master' database..."
+Show-ProgressMessage -message "Configuring database file growth settings for 'master' database..."
 Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Data -GrowthType MB -Growth 128
 Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Log -GrowthType MB -Growth 64
-if ($DebugMode) { Write-Debug "Configured 'master' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
+if ($debugMode) { Write-Debug "Configured 'master' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
 
-Show-ProgressMessage -Message "Configuring database file growth settings for 'msdb' database..."
+Show-ProgressMessage -message "Configuring database file growth settings for 'msdb' database..."
 Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Data -GrowthType MB -Growth 128
 Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Log -GrowthType MB -Growth 64
-if ($DebugMode) { Write-Debug "Configured 'msdb' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
+if ($debugMode) { Write-Debug "Configured 'msdb' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
 
-Show-ProgressMessage -Message "Configuring database file growth settings for 'model' database..."
+Show-ProgressMessage -message "Configuring database file growth settings for 'model' database..."
 Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Data -GrowthType MB -Growth 128
 Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Log -GrowthType MB -Growth 64
-if ($DebugMode) { Write-Debug "Configured 'model' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
+if ($debugMode) { Write-Debug "Configured 'model' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
 
-Show-ProgressMessage -Message "Configuring SQL Agent server settings..."
-Set-DbaAgentServer -SqlInstance $server -MaximumJobHistoryRows 0 -MaximumHistoryRows -1
-if ($DebugMode) { Write-Debug "Configured SQL Agent server settings (MaximumJobHistoryRows: 0, MaximumHistoryRows: -1) on server $server" }
+Show-ProgressMessage -message "Configuring SQL Agent server settings..."
+try {
+    Set-DbaAgentServer -SqlInstance $server -MaximumJobHistoryRows 0 -MaximumHistoryRows -1 -ReplaceAlertTokens Enabled
+    if ($debugMode) { Write-Debug "Configured SQL Agent server settings on server $server" }
+}
+catch {
+    Write-Host "Warning: Failed to configure SQL Agent server settings. Ensure 'Agent XPs' is enabled." -ForegroundColor Yellow
+    Write-Host "Error details: $_"
+    if ($debugMode) { Write-Debug "Failed to configure SQL Agent server settings on server $server. Error details: $_" }
+    Exit 1
+}
 
-Show-ProgressMessage -Message "Additional configuration steps completed."
+Show-ProgressMessage -message "Configuring lock pages in memory..."
+try {
+    Set-DbaPrivilege -ComputerName $server -Type LPIM -ErrorAction Stop
+    if ($debugMode) { Write-Debug "Configured lock pages in memory setting on server $server" }
+}
+catch {
+    Write-Host "Warning: Failed to configure lock pages in memory." -ForegroundColor Yellow
+    Write-Host "Error details: $_"
+    if ($debugMode) { Write-Debug "Failed to configure lock pages in memory on server $server. Error details: $_" }
+    Exit 1
+}
+
+Show-ProgressMessage -message "Additional configuration steps completed."
 
 # Install SSMS if requested and SQL Server installation was successful
-if ($InstallSSMS) {
+if ($installSsms) {
     # Check if SSMS is already installed
-    if (Test-SSMSInstalled) {
+    if (Test-SsmsInstalled) {
         Write-Host "SQL Server Management Studio (SSMS) is already installed. Exiting script." -ForegroundColor Red
-        if ($DebugMode) { Write-Debug "SQL Server Management Studio (SSMS) is already installed." }
+        if ($debugMode) { Write-Debug "SQL Server Management Studio (SSMS) is already installed." }
         Exit 0
     }
 
-    Show-ProgressMessage -Message "Installing SQL Server Management Studio (SSMS)..."
-    Install-SSMS -installerPath $SSMSInstallerPath
+    Show-ProgressMessage -message "Installing SQL Server Management Studio (SSMS)..."
+    Install-Ssms -installerPath $ssmsInstallerPath
 }
 else {
     Write-Host "SSMS installation not requested. Skipping SSMS installation." -ForegroundColor Yellow
-    if ($DebugMode) { Write-Debug "SSMS installation not requested. Skipping SSMS installation." }
+    if ($debugMode) { Write-Debug "SSMS installation not requested. Skipping SSMS installation." }
 }
 
-# Function to verify if updates were applied
-function Test-UpdatesApplied {
-    param (
-        [string]$updateSourcePath
-    )
-
-    $updateFiles = Get-ChildItem -Path $updateSourcePath -Filter *.exe
-    if ($updateFiles.Count -eq 0) {
-        Write-Host "No update files found in ${updateSourcePath}" -ForegroundColor Yellow
-        if ($DebugMode) { Write-Debug "No update files found in ${updateSourcePath}" }
-    }
-    else {
-        Write-Host "Update files found in ${updateSourcePath}:"
-        foreach ($file in $updateFiles) {
-            Write-Host "Update: $($file.Name)"
-            if ($DebugMode) { Write-Debug "Update file found: $($file.Name)" }
-        }
-    }
-}
-
-Show-ProgressMessage -Message "Verifying if updates were applied..."
+Show-ProgressMessage -message "Verifying if updates were applied..."
 Test-UpdatesApplied -updateSourcePath $updateSourcePath
+
+# Restart SQL Server services to apply trace flags and other settings
+Show-ProgressMessage -message "Restarting SQL Server services to apply settings..."
+try {
+    Restart-DbaService -SqlInstance $server -Type Engine, Agent -Confirm:$false
+    Write-Host "SQL Server services restarted successfully." -ForegroundColor Green
+    if ($debugMode) { Write-Debug "SQL Server services restarted successfully on server $server" }
+}
+catch {
+    Write-Host "Failed to restart SQL Server services." -ForegroundColor Red
+    Write-Host "Error Details: $_"
+    if ($debugMode) { Write-Debug "Failed to restart SQL Server services on server $server. Error details: $_" }
+    Exit 1
+}
+
+# Verify if SQL Server Agent is running
+$agentServiceStatus = Get-Service -Name "SQLSERVERAGENT" -ErrorAction SilentlyContinue
+if ($agentServiceStatus -and $agentServiceStatus.Status -ne 'Running') {
+    Write-Host "SQL Server Agent is not running. Attempting to start it..." -ForegroundColor Yellow
+    try {
+        Start-Service -Name "SQLSERVERAGENT"
+        Write-Host "SQL Server Agent started successfully." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Failed to start SQL Server Agent." -ForegroundColor Red
+        Write-Host "Error Details: $_"
+        if ($debugMode) { Write-Debug "Failed to start SQL Server Agent. Error details: $_" }
+        Exit 1
+    }
+}
+
+Write-Host "SQL Server installation and configuration completed successfully." -ForegroundColor Green
+if ($debugMode) { Write-Debug "SQL Server installation and configuration completed successfully on server $server" }
