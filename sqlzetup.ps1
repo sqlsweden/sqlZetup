@@ -408,6 +408,7 @@ function Start-SqlServerAgent {
     }
 }
 
+# Function to initialize the dbatools module
 function Initialize-DbatoolsModule {
     # Print to the screen that the module loading process is starting
     Write-Host "Checking if module dbatools is already loaded..."
@@ -443,6 +444,7 @@ function Initialize-DbatoolsModule {
     }
 }
 
+# Function to read passwords and store them securely
 function Read-Passwords {
     # Show progress message
     Show-ProgressMessage -message "Prompting for input of passwords..."
@@ -466,6 +468,7 @@ function Read-Passwords {
 
 # Main Script Execution
 
+# Initialize the dbatools module
 Initialize-DbatoolsModule
 
 # Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
@@ -473,6 +476,7 @@ if ($null -eq $config.AgtSvcAccount) {
     $config.AgtSvcAccount = $config.SqlSvcAccount
 }
 
+# Show progress message for verifying volume block sizes
 Show-ProgressMessage -message "Verifying volume block sizes..."
 $volumePaths = @(
     $config.SqlTempDbLogDir,
@@ -482,6 +486,7 @@ $volumePaths = @(
     "H:\MSSQL\Backup"
 )
 
+# Test volume block sizes and handle user decision if sizes are not correct
 if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
     $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
     if ($userInput -ne 'Y') {
@@ -491,6 +496,7 @@ if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
     }
 }
 
+# Read passwords and store them securely
 Read-Passwords
 
 # Determine installer path
@@ -511,6 +517,7 @@ catch {
     Exit 1
 }
 
+# Get SQL version and update directory
 try {
     $sqlVersion = Get-SqlVersion -installerPath $installerPath
     $updateDirectory = Get-UpdateDirectory -version $sqlVersion
@@ -565,7 +572,7 @@ else {
     $VerbosePreference = "SilentlyContinue"
 }
 
-# SQL Server Installation
+# Show progress message for starting SQL Server installation
 Show-ProgressMessage -message "Starting SQL Server installation..."
 try {
     Invoke-Command {
@@ -631,6 +638,7 @@ foreach ($entry in $orderList) {
     }
 }
 
+# Show progress message for verifying SQL script execution
 Show-ProgressMessage -message "Verifying SQL script execution..."
 Test-SqlExecution -serverInstance $server -databaseName "master" -query $verificationQuery
 
@@ -722,7 +730,7 @@ catch {
 
 Show-ProgressMessage -message "Additional configuration steps completed."
 
-# Install SSMS if requested and SQL Server installation was successful
+# Install SSMS if requested
 if ($installSsms) {
     # Check if SSMS is already installed
     if (Test-SsmsInstalled) {
