@@ -1,60 +1,53 @@
-
 <#
 .SYNOPSIS
-    Detta skript demonstrerar bästa praxis för strukturering av PowerShell-skript.
+    Automates the installation and configuration of SQL Server, including additional setup tasks and optional SSMS installation.
+
 .DESCRIPTION
-    Skriptet laddar nödvändiga moduler, deklarerar variabler och funktioner, och innehåller huvudlogik samt felhantering.
+    This script is designed to streamline the installation and configuration of SQL Server. It includes mounting the SQL Server ISO, configuring SQL Server instance settings, applying necessary updates, and executing SQL scripts in a specified order. The script ensures best practices such as checking volume block sizes and setting SQL Server configurations for optimal performance.
+
+    Features:
+    - Mounts SQL Server ISO and retrieves the setup executable.
+    - Installs SQL Server with specified configurations.
+    - Configures TempDB settings, error log settings, and other SQL Server parameters.
+    - Executes a series of SQL scripts in a specified order.
+    - Checks for and installs SQL Server Management Studio (SSMS) if requested.
+    - Ensures SQL Server Agent is running and applies any required updates.
+    - Uses relative paths to maintain flexibility in script and directory locations.
+    - Provides secure prompts for sensitive information like passwords.
+
+    The script assumes the directory structure is consistent, with all necessary files organized within the `sqlzetup` folder. It dynamically adapts to the root location of this folder, allowing for flexibility in deployment locations.
+    
 .AUTHOR
     Michael Pettersson
+
 .VERSION
     1.0
 #>
 
-# Print to the screen that the module loading process is starting
-Write-Host "Checking if module dbatools is already loaded..."
-
-# Check if the module is already loaded
-if (Get-Module -Name dbatools -ListAvailable) {
-    Write-Host "Module dbatools is already loaded."
-}
-else {
-    Write-Host "Loading module: dbatools..."
-    try {
-        # Load the module
-        Import-Module dbatools -ErrorAction Stop
-
-        # Confirm that the module has been loaded
-        Write-Host "Module dbatools loaded successfully."
-    }
-    catch {
-        # Handle the error if the module fails to load
-        Write-Host "Error: Failed to load module dbatools." -ForegroundColor Red
-        Write-Host "Error details: $_"
-        if ($debugMode) { Write-Debug "Failed to load module dbatools. Error details: $_" }
-        Exit 1
-    }
-}
+# Get the current script directory
+$scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 
 # User Configurable Parameters
 [string]$edition = "Developer"
 [string]$productKey = $null
-[bool]$installSsms = $true
+[bool]$installSsms = $false
 [int]$TempdbDataFileSize = 200 # MB - this is the full tempdb datafile(s) size divided over several files
 [int]$TempdbLogFileSize = 50 # MB
 [int]$TempdbDataFileGrowth = 100 # MB
 [int]$TempdbLogFileGrowth = 100 # MB
-[string]$sqlInstallerLocalPath = "C:\Temp\sqlzetup\SQLServer2022-x64-ENU-Dev.iso"
+[string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso" # Change name
 [bool]$debugMode = $false
 
 # Parameters not likely to change
 [string]$server = $env:COMPUTERNAME
 [string]$tableName = "CommandLog"
+[string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe"
 
 # Configuration for paths
 $config = @{
     SqlTempDbLogDir       = "F:\MSSQL\Log"
     SqlTempDbDir          = "G:\MSSQL\Data"
-    SqlTempDbFileCount    = 1 # Number of Database Engine TempDB files. Will change automaticcaly later.
+    SqlTempDbFileCount    = 1 # Number of Database Engine TempDB files. Will change automatically later.
     BrowserSvcStartupType = "Disabled"
     NpEnabled             = 0
     TcpEnabled            = 1
@@ -65,12 +58,23 @@ $config = @{
     SaPwd                 = $null
 }
 
-# Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
-if ($null -eq $config.AgtSvcAccount) {
-    $config.AgtSvcAccount = $config.SqlSvcAccount
-}
+# Define variables
+[string]$scriptDirectory = "$scriptDir\Sql"
+[string]$orderFile = "$scriptDir\order.txt"
 
-$script:ssmsInstallerPath = "C:\Temp\sqlzetup\SSMS-Setup-ENU.exe"
+# Verification query
+[string]$verificationQuery = @"
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$tableName')
+BEGIN
+    SELECT 'Table exists' AS Column1
+END
+ELSE
+BEGIN
+    SELECT 'Table does not exist' AS Column1
+END
+"@
+
+# Functions
 
 # Function to show progress messages
 function Show-ProgressMessage {
@@ -107,25 +111,6 @@ function Test-VolumeBlockSize {
     return $blockSizeOK
 }
 
-# Check block size of specified volumes before installation
-$volumePaths = @(
-    $config.SqlTempDbLogDir,
-    $config.SqlTempDbDir,
-    "E:\MSSQL\Data",
-    "F:\MSSQL\Log",
-    "H:\MSSQL\Backup"
-)
-
-Show-ProgressMessage -message "Verifying volume block sizes..."
-if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
-    $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
-    if ($userInput -ne 'Y') {
-        Write-Host "Installation cancelled by user." -ForegroundColor Red
-        if ($debugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
-        Exit 1
-    }
-}
-
 # Function to prompt for secure passwords
 function Get-SecurePasswords {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
@@ -152,22 +137,6 @@ function New-SqlCredentials {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
     $global:sqlAgentCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $config.AgtSvcAccount, $sqlAgentServiceAccountPassword
 }
-
-# Prompt for input of passwords
-Show-ProgressMessage -message "Prompting for input of passwords..."
-try {
-    Get-SecurePasswords
-    New-SqlCredentials
-}
-catch {
-    Write-Host "Failed to prompt for input of passwords." -ForegroundColor Red
-    Write-Host "Error details: $_"
-    Exit 1
-}
-
-$config.SqlSvcPassword = $sqlServiceCredential.GetNetworkCredential().Password
-$config.AgtSvcPassword = $sqlAgentCredential.GetNetworkCredential().Password
-$config.SaPwd = $saCredential.GetNetworkCredential().Password
 
 # Function to mount ISO and get setup.exe path
 function Mount-IsoAndGetSetupPath {
@@ -213,7 +182,7 @@ function Dismount-Iso {
     }
 }
 
-# Function to determine installer path based on file type
+# Function to determine installer path
 function Get-InstallerPath {
     param (
         [string]$installerPath
@@ -226,25 +195,11 @@ function Get-InstallerPath {
     if ($fileExtension -eq ".iso") {
         return Mount-IsoAndGetSetupPath -isoPath $installerPath
     }
-    elseif ($fileExtension -eq ".exe") {
-        return $installerPath, ""
-    }
     else {
-        Write-Host "Unsupported file type: $fileExtension. Please provide a path to an .iso or .exe file." -ForegroundColor Red
+        Write-Host "Unsupported file type: $fileExtension. Please provide a path to an .iso file." -ForegroundColor Red
         if ($debugMode) { Write-Debug "Unsupported file type: $fileExtension" }
         Exit 1
     }
-}
-
-try {
-    $installerDetails = Get-InstallerPath -installerPath $sqlInstallerLocalPath
-    $installerPath = $installerDetails[0]
-    $driveLetter = $installerDetails[1]
-}
-catch {
-    Write-Host "Failed to determine installer path." -ForegroundColor Red
-    Write-Host "Error details: $_"
-    Exit 1
 }
 
 # Function to get SQL Server version from the installer
@@ -282,62 +237,6 @@ function Get-UpdateDirectory {
         }
     }
 }
-
-try {
-    $sqlVersion = Get-SqlVersion -installerPath $installerPath
-    $updateDirectory = Get-UpdateDirectory -version $sqlVersion
-    $updateSourcePath = "C:\Temp\sqlzetup\Updates\$updateDirectory"
-}
-catch {
-    Write-Host "Failed to get SQL Server version or update directory." -ForegroundColor Red
-    Write-Host "Error details: $_"
-    Exit 1
-}
-
-$installParams = @{
-    SqlInstance                   = $server
-    Version                       = 2022
-    Verbose                       = $false
-    Confirm                       = $false
-    Feature                       = "Engine"
-    InstancePath                  = "C:\Program Files\Microsoft SQL Server"
-    DataPath                      = "E:\MSSQL\Data"
-    LogPath                       = "F:\MSSQL\Log"
-    BackupPath                    = "H:\MSSQL\Backup"
-    Path                          = "${driveLetter}:\"
-    InstanceName                  = "MSSQLSERVER"
-    AgentCredential               = $sqlAgentCredential
-    SqlCollation                  = "Finnish_Swedish_CI_AS"
-    AdminAccount                  = "agdemo\sqlgroup"
-    UpdateSourcePath              = $updateSourcePath
-    PerformVolumeMaintenanceTasks = $true
-    AuthenticationMode            = "Mixed"
-    EngineCredential              = $sqlServiceCredential
-    Port                          = 1433
-    SaCredential                  = $saCredential
-    Configuration                 = $config
-}
-
-# Conditionally add the PID to the install parameters if it's needed
-if ($edition -ne "Developer") {
-    if ($null -eq $productKey) {
-        Write-Host "Product key is required for Standard and Enterprise editions." -ForegroundColor Red
-        if ($debugMode) { Write-Debug "Product key is required for Standard and Enterprise editions." }
-        Exit 1
-    }
-    $installParams.Pid = $productKey
-}
-
-# Set verbose preference based on DebugMode
-if ($debugMode) {
-    $VerbosePreference = "Continue"
-}
-else {
-    $VerbosePreference = "SilentlyContinue"
-}
-
-# Disable verbose output for dbatools cmdlets
-$global:PSDefaultParameterValues = @{"*:Verbose" = $false }
 
 # Function to check for reboot requirement
 function Test-RebootRequirement {
@@ -439,80 +338,6 @@ function Test-UpdatesApplied {
     }
 }
 
-# Proceed with your script
-Show-ProgressMessage -message "Determining installer path..."
-Show-ProgressMessage -message "Installer path determined: $installerPath"
-
-Show-ProgressMessage -message "Starting SQL Server installation..."
-try {
-    Invoke-Command {
-        Install-DbaInstance @installParams
-    } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false
-}
-catch {
-    Write-Host "SQL Server installation failed with an error. Exiting script." -ForegroundColor Red
-    Write-Host "Error Details: $_"
-    if ($debugMode) { Write-Debug "SQL Server installation failed. Error details: $_" }
-    Exit 1
-}
-
-# Capture and suppress detailed output, only show if debugMode is enabled
-if ($debugMode) {
-    Write-Host "Installation Output:"
-    $installOutput
-    Write-Host "Installation Errors:"
-    $installError
-    Write-Host "Installation Warnings:"
-    $installWarning
-}
-
-# Check install warning for a reboot requirement message
-Test-RebootRequirement -warnings $installWarning
-
-# Unmount ISO if it was used
-if ([System.IO.Path]::GetExtension($sqlInstallerLocalPath).ToLower() -eq ".iso") {
-    Dismount-Iso -isoPath $sqlInstallerLocalPath
-}
-
-# New solution for running SQL scripts based on order.txt
-# Define variables
-[string]$scriptDirectory = "C:\Temp\sqlzetup\Sql"
-[string]$orderFile = "C:\Temp\sqlzetup\order.txt"
-
-# Read order file
-$orderList = Get-Content -Path $orderFile
-
-foreach ($entry in $orderList) {
-    # Split the database and file name
-    $parts = $entry -split ":"
-    $databaseName = $parts[0]
-    $fileName = $parts[1]
-    $filePath = Join-Path -Path $scriptDirectory -ChildPath $fileName
-
-    if (Test-Path $filePath) {
-        # Read the contents of the SQL file
-        $scriptContent = Get-Content -Path $filePath -Raw
-
-        try {
-            # Execute the SQL script against the specified database
-            Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent
-            Write-Output "Successfully executed script: $fileName on database: $databaseName"
-            if ($debugMode) { Write-Debug "Successfully executed script: $fileName on database: $databaseName" }
-        }
-        catch {
-            Write-Output "Failed to execute script: $fileName on database: $databaseName"
-            Write-Output $_.Exception.Message
-            if ($debugMode) { Write-Debug "Failed to execute script: $fileName on database: $databaseName. Error: $_" }
-            Exit 1
-        }
-    }
-    else {
-        Write-Output "File not found: $fileName"
-        if ($debugMode) { Write-Debug "File not found: $fileName in path: $filePath" }
-        Exit 1
-    }
-}
-
 # Function to verify SQL script execution
 function Test-SqlExecution {
     param (
@@ -557,17 +382,254 @@ function Test-SqlExecution {
     }
 }
 
-# Verification query
-[string]$verificationQuery = @"
-IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$tableName')
-BEGIN
-    SELECT 'Table exists' AS Column1
-END
-ELSE
-BEGIN
-    SELECT 'Table does not exist' AS Column1
-END
-"@
+# Function to start SQL Server Agent
+function Start-SqlServerAgent {
+    param (
+        [bool]$DebugMode
+    )
+
+    # Verify if SQL Server Agent is running
+    $agentServiceStatus = Get-Service -Name "SQLSERVERAGENT" -ErrorAction SilentlyContinue
+    if ($agentServiceStatus -and $agentServiceStatus.Status -ne 'Running') {
+        Write-Host "SQL Server Agent is not running. Attempting to start it..." -ForegroundColor Yellow
+        try {
+            Start-Service -Name "SQLSERVERAGENT"
+            Write-Host "SQL Server Agent started successfully." -ForegroundColor Green
+        }
+        catch {
+            Write-Host "Failed to start SQL Server Agent." -ForegroundColor Red
+            Write-Host "Error Details: $_"
+            if ($DebugMode) { Write-Debug "Failed to start SQL Server Agent. Error details: $_" }
+            Exit 1
+        }
+    }
+    else {
+        Write-Host "SQL Server Agent is already running." -ForegroundColor Green
+    }
+}
+
+function Initialize-DbatoolsModule {
+    # Print to the screen that the module loading process is starting
+    Write-Host "Checking if module dbatools is already loaded..."
+
+    # Check if the module is already loaded
+    if (Get-Module -Name dbatools -ListAvailable) {
+        Write-Host "Module dbatools is already loaded."
+    }
+    else {
+        Write-Host "Loading module: dbatools..."
+        try {
+            # Load the module
+            Import-Module dbatools -ErrorAction Stop
+
+            # Confirm that the module has been loaded
+            Write-Host "Module dbatools loaded successfully."
+        }
+        catch {
+            # Handle the error if the module fails to load
+            Write-Host "Error: Failed to load module dbatools." -ForegroundColor Red
+            Write-Host "Error details: $_"
+            if ($debugMode) { Write-Debug "Failed to load module dbatools. Error details: $_" }
+
+            # Provide information on how to install dbatools
+            Write-Host "Installation of dbatools" -ForegroundColor Yellow
+            Write-Host "https://dbatools.io/download/" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Offline Installation of dbatools 2.0 with the dbatools.library Dependency" -ForegroundColor Yellow
+            Write-Host "https://blog.netnerds.net/2023/04/offline-install-of-dbatools-and-dbatools-library/" -ForegroundColor Yellow
+
+            Exit 1
+        }
+    }
+}
+
+function Read-Passwords {
+    # Show progress message
+    Show-ProgressMessage -message "Prompting for input of passwords..."
+    try {
+        # Get secure passwords and create SQL credentials
+        Get-SecurePasswords
+        New-SqlCredentials
+    }
+    catch {
+        # Handle the error if prompting for passwords fails
+        Write-Host "Failed to prompt for input of passwords." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        Exit 1
+    }
+
+    # Store passwords in the config object
+    $config.SqlSvcPassword = $sqlServiceCredential.GetNetworkCredential().Password
+    $config.AgtSvcPassword = $sqlAgentCredential.GetNetworkCredential().Password
+    $config.SaPwd = $saCredential.GetNetworkCredential().Password
+}
+
+# Main Script Execution
+
+Initialize-DbatoolsModule
+
+# Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
+if ($null -eq $config.AgtSvcAccount) {
+    $config.AgtSvcAccount = $config.SqlSvcAccount
+}
+
+Show-ProgressMessage -message "Verifying volume block sizes..."
+$volumePaths = @(
+    $config.SqlTempDbLogDir,
+    $config.SqlTempDbDir,
+    "E:\MSSQL\Data",
+    "F:\MSSQL\Log",
+    "H:\MSSQL\Backup"
+)
+
+if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
+    $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
+    if ($userInput -ne 'Y') {
+        Write-Host "Installation cancelled by user." -ForegroundColor Red
+        if ($debugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
+        Exit 1
+    }
+}
+
+Read-Passwords
+
+# Determine installer path
+try {
+    $installerDetails = Get-InstallerPath -installerPath $sqlInstallerLocalPath
+    $installerPath = $installerDetails[0]
+    $driveLetter = $installerDetails[1]
+    
+    # Check if installer path exists
+    if (-Not (Test-Path -Path $installerPath)) {
+        Write-Host "Installer path not found: $installerPath" -ForegroundColor Red
+        Exit 1
+    }
+}
+catch {
+    Write-Host "Failed to determine installer path." -ForegroundColor Red
+    Write-Host "Error details: $_"
+    Exit 1
+}
+
+try {
+    $sqlVersion = Get-SqlVersion -installerPath $installerPath
+    $updateDirectory = Get-UpdateDirectory -version $sqlVersion
+    $updateSourcePath = "$scriptDir\Updates\$updateDirectory"
+}
+catch {
+    Write-Host "Failed to get SQL Server version or update directory." -ForegroundColor Red
+    Write-Host "Error details: $_"
+    Exit 1
+}
+
+# SQL Server Installation Parameters
+$installParams = @{
+    SqlInstance                   = $server
+    Version                       = 2022
+    Verbose                       = $false
+    Confirm                       = $false
+    Feature                       = "Engine"
+    InstancePath                  = "C:\Program Files\Microsoft SQL Server"
+    DataPath                      = "E:\MSSQL\Data"
+    LogPath                       = "F:\MSSQL\Log"
+    BackupPath                    = "H:\MSSQL\Backup"
+    Path                          = "${driveLetter}:\"
+    InstanceName                  = "MSSQLSERVER"
+    AgentCredential               = $sqlAgentCredential
+    SqlCollation                  = "Finnish_Swedish_CI_AS"
+    AdminAccount                  = "agdemo\sqlgroup"
+    UpdateSourcePath              = $updateSourcePath
+    PerformVolumeMaintenanceTasks = $true
+    AuthenticationMode            = "Mixed"
+    EngineCredential              = $sqlServiceCredential
+    Port                          = 1433
+    SaCredential                  = $saCredential
+    Configuration                 = $config
+}
+
+# Conditionally add the PID to the install parameters if it's needed
+if ($edition -ne "Developer") {
+    if ($null -eq $productKey) {
+        Write-Host "Product key is required for Standard and Enterprise editions." -ForegroundColor Red
+        if ($debugMode) { Write-Debug "Product key is required for Standard and Enterprise editions." }
+        Exit 1
+    }
+    $installParams.Pid = $productKey
+}
+
+# Set verbose preference based on DebugMode
+if ($debugMode) {
+    $VerbosePreference = "Continue"
+}
+else {
+    $VerbosePreference = "SilentlyContinue"
+}
+
+# SQL Server Installation
+Show-ProgressMessage -message "Starting SQL Server installation..."
+try {
+    Invoke-Command {
+        Install-DbaInstance @installParams
+    } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false
+}
+catch {
+    Write-Host "SQL Server installation failed with an error. Exiting script." -ForegroundColor Red
+    Write-Host "Error Details: $_"
+    if ($debugMode) { Write-Debug "SQL Server installation failed. Error details: $_" }
+    Exit 1
+}
+
+# Capture and suppress detailed output, only show if debugMode is enabled
+if ($debugMode) {
+    Write-Host "Installation Output:"
+    $installOutput
+    Write-Host "Installation Errors:"
+    $installError
+    Write-Host "Installation Warnings:"
+    $installWarning
+}
+
+# Check install warning for a reboot requirement message
+Test-RebootRequirement -warnings $installWarning
+
+# Unmount ISO if it was used
+if ([System.IO.Path]::GetExtension($sqlInstallerLocalPath).ToLower() -eq ".iso") {
+    Dismount-Iso -isoPath $sqlInstallerLocalPath
+}
+
+# Read order file
+$orderList = Get-Content -Path $orderFile
+
+foreach ($entry in $orderList) {
+    # Split the database and file name
+    $parts = $entry -split ":"
+    $databaseName = $parts[0]
+    $fileName = $parts[1]
+    $filePath = Join-Path -Path $scriptDirectory -ChildPath $fileName
+
+    if (Test-Path $filePath) {
+        # Read the contents of the SQL file
+        $scriptContent = Get-Content -Path $filePath -Raw
+
+        try {
+            # Execute the SQL script against the specified database
+            Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent
+            Write-Output "Successfully executed script: $fileName on database: $databaseName"
+            if ($debugMode) { Write-Debug "Successfully executed script: $fileName on database: $databaseName" }
+        }
+        catch {
+            Write-Output "Failed to execute script: $fileName on database: $databaseName"
+            Write-Output $_.Exception.Message
+            if ($debugMode) { Write-Debug "Failed to execute script: $fileName on database: $databaseName. Error: $_" }
+            Exit 1
+        }
+    }
+    else {
+        Write-Output "File not found: $fileName"
+        if ($debugMode) { Write-Debug "File not found: $fileName in path: $filePath" }
+        Exit 1
+    }
+}
 
 Show-ProgressMessage -message "Verifying SQL script execution..."
 Test-SqlExecution -serverInstance $server -databaseName "master" -query $verificationQuery
@@ -639,7 +701,7 @@ catch {
 }
 
 # Get the number of CPU cores
-(Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+$cpuCores = (Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 
 # Set the variable to the number of cores or 8, whichever is lower
 $maxCores = if ($cpuCores -gt 8) { 8 } else { $cpuCores }
@@ -695,21 +757,19 @@ catch {
 }
 
 # Verify if SQL Server Agent is running
-$agentServiceStatus = Get-Service -Name "SQLSERVERAGENT" -ErrorAction SilentlyContinue
-if ($agentServiceStatus -and $agentServiceStatus.Status -ne 'Running') {
-    Write-Host "SQL Server Agent is not running. Attempting to start it..." -ForegroundColor Yellow
-    try {
-        Start-Service -Name "SQLSERVERAGENT"
-        Write-Host "SQL Server Agent started successfully." -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Failed to start SQL Server Agent." -ForegroundColor Red
-        Write-Host "Error Details: $_"
-        if ($debugMode) { Write-Debug "Failed to start SQL Server Agent. Error details: $_" }
-        Exit 1
-    }
-}
+Start-SqlServerAgent -DebugMode $debugMode
 
 Write-Host "SQL Server installation and configuration completed successfully." -ForegroundColor Green
-if ($debugMode) { Write-Debug "SQL Server installation and configuration completed successfully on server $server" }
 
+if ($debugMode) { 
+    Write-Debug "SQL Server installation and configuration completed successfully on server $server" 
+}
+
+# Add an empty line for line break
+Write-Host ""
+
+# Add additional info for the end user when installation is complete
+Write-Host "Info about:"
+Write-Host "- gdfgdgdg"
+Write-Host "- dfggdfgdg"
+Write-Host "- fdgdfgdgdfg"
