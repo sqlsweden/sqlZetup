@@ -1,22 +1,66 @@
-# Configuration Variables
-[string]$server = $env:COMPUTERNAME
+
+<#
+.SYNOPSIS
+    Detta skript demonstrerar bästa praxis för strukturering av PowerShell-skript.
+.DESCRIPTION
+    Skriptet laddar nödvändiga moduler, deklarerar variabler och funktioner, och innehåller huvudlogik samt felhantering.
+.AUTHOR
+    Michael Pettersson
+.VERSION
+    1.0
+#>
+
+# Print to the screen that the module loading process is starting
+Write-Host "Checking if module dbatools is already loaded..."
+
+# Check if the module is already loaded
+if (Get-Module -Name dbatools -ListAvailable) {
+    Write-Host "Module dbatools is already loaded."
+}
+else {
+    Write-Host "Loading module: dbatools..."
+    try {
+        # Load the module
+        Import-Module dbatools -ErrorAction Stop
+
+        # Confirm that the module has been loaded
+        Write-Host "Module dbatools loaded successfully."
+    }
+    catch {
+        # Handle the error if the module fails to load
+        Write-Host "Error: Failed to load module dbatools." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        if ($debugMode) { Write-Debug "Failed to load module dbatools. Error details: $_" }
+        Exit 1
+    }
+}
+
+# User Configurable Parameters
 [string]$edition = "Developer"
 [string]$productKey = $null
 [bool]$installSsms = $true
-[bool]$debugMode = $false
+[int]$TempdbDataFileSize = 200 # MB - this is the full tempdb datafile(s) size divided over several files
+[int]$TempdbLogFileSize = 50 # MB
+[int]$TempdbDataFileGrowth = 100 # MB
+[int]$TempdbLogFileGrowth = 100 # MB
 [string]$sqlInstallerLocalPath = "C:\Temp\sqlzetup\SQLServer2022-x64-ENU-Dev.iso"
+[bool]$debugMode = $false
+
+# Parameters not likely to change
+[string]$server = $env:COMPUTERNAME
 [string]$tableName = "CommandLog"
 
 # Configuration for paths
 $config = @{
     SqlTempDbLogDir       = "F:\MSSQL\Log"
     SqlTempDbDir          = "G:\MSSQL\Data"
+    SqlTempDbFileCount    = 1 # Number of Database Engine TempDB files. Will change automaticcaly later.
     BrowserSvcStartupType = "Disabled"
     NpEnabled             = 0
     TcpEnabled            = 1
     SqlSvcAccount         = "agdemo\sqlengine"
     SqlSvcPassword        = $null
-    AgtSvcAccount         = $null #"agdemo\sqlagent"
+    AgtSvcAccount         = $null # "agdemo\sqlagent"
     AgtSvcPassword        = $null
     SaPwd                 = $null
 }
@@ -296,7 +340,7 @@ else {
 $global:PSDefaultParameterValues = @{"*:Verbose" = $false }
 
 # Function to check for reboot requirement
-function Check-RebootRequirement {
+function Test-RebootRequirement {
     param (
         [string]$warnings
     )
@@ -423,7 +467,7 @@ if ($debugMode) {
 }
 
 # Check install warning for a reboot requirement message
-Check-RebootRequirement -warnings $installWarning
+Test-RebootRequirement -warnings $installWarning
 
 # Unmount ISO if it was used
 if ([System.IO.Path]::GetExtension($sqlInstallerLocalPath).ToLower() -eq ".iso") {
@@ -594,15 +638,23 @@ catch {
     Exit 1
 }
 
-Show-ProgressMessage -message "Configuring lock pages in memory..."
+# Get the number of CPU cores
+(Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+
+# Set the variable to the number of cores or 8, whichever is lower
+$maxCores = if ($cpuCores -gt 8) { 8 } else { $cpuCores }
+
+# Show progress message for configuring TempDB
+Show-ProgressMessage -message "Configuring TempDB..."
 try {
-    Set-DbaPrivilege -ComputerName $server -Type LPIM -ErrorAction Stop
-    if ($debugMode) { Write-Debug "Configured lock pages in memory setting on server $server" }
+    # Configure TempDB with the determined number of cores
+    Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop
+    if ($debugMode) { Write-Debug "Configured TempDB on server $server with $maxCores data files" }
 }
 catch {
-    Write-Host "Warning: Failed to configure lock pages in memory." -ForegroundColor Yellow
+    Write-Host "Warning: Failed to configure TempDB." -ForegroundColor Yellow
     Write-Host "Error details: $_"
-    if ($debugMode) { Write-Debug "Failed to configure lock pages in memory on server $server. Error details: $_" }
+    if ($debugMode) { Write-Debug "Failed to configure TempDB on server $server. Error details: $_" }
     Exit 1
 }
 
