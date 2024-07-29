@@ -41,15 +41,23 @@
 $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 
 # User Configurable Parameters
-[string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso" # Change name
-[string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe" # Change name if needed
+[string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso"
+[string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe"
 [string]$edition = "Developer"
 [string]$productKey = $null
 [string]$SqlDataDir = "E:\MSSQL\Data"
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
+[string]$SqlTempDbLogDir = "F:\MSSQL\Log"
+[string]$SqlTempDbDir = "G:\MSSQL\Data" 
+[ValidateSet("Automatic", "Disabled", "Manual")]
+[string]$BrowserSvcStartupType = "Disabled"
+[ValidateSet(0, 1)]
+[int]$NpEnabled = 0
+[ValidateSet(0, 1)]
+[int]$TcpEnabled = 1
 [ValidateRange(512, [int]::MaxValue)]
-[int]$TempdbDataFileSize = 512 # MB - this is the full tempdb datafile(s) size divided over several files
+[int]$TempdbDataFileSize = 512 # MB
 [ValidateRange(64, [int]::MaxValue)]
 [int]$TempdbLogFileSize = 64
 [int]$TempdbDataFileGrowth = 128
@@ -60,15 +68,16 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 # Statis parameters
 [string]$server = $env:COMPUTERNAME
 [string]$tableName = "CommandLog"
+[int]$SqlTempDbFileCount = 1
 
 # Configuration for paths
 $config = @{
-    SqlTempDbLogDir       = "F:\MSSQL\Log"
-    SqlTempDbDir          = "G:\MSSQL\Data"
-    SqlTempDbFileCount    = 1 # Will change automatically later to reflect core count in machine
-    BrowserSvcStartupType = "Disabled"
-    NpEnabled             = 0
-    TcpEnabled            = 1
+    SqlTempDbLogDir       = $SqlTempDbLogDir
+    SqlTempDbDir          = $SqlTempDbDir
+    SqlTempDbFileCount    = $SqlTempDbFileCount
+    BrowserSvcStartupType = $BrowserSvcStartupType
+    NpEnabled             = $NpEnabled
+    TcpEnabled            = $TcpEnabled
     SqlSvcAccount         = "agdemo\sqlengine"
     SqlSvcPassword        = $null
     AgtSvcAccount         = $null # Specifying $null = SqlSvcAccount # "agdemo\sqlagent"
@@ -534,6 +543,96 @@ function Restart-SqlServices {
     }
 }
 
+# Function to determine installer path, SQL version, and update directory
+function Get-SqlInstallerDetails {
+    param (
+        [string]$installerPath,
+        [string]$scriptDir
+    )
+
+    try {
+        $installerDetails = Get-InstallerPath -installerPath $installerPath
+        $setupPath = $installerDetails[0]
+        $driveLetter = $installerDetails[1]
+
+        # Check if installer path exists
+        if (-Not (Test-Path -Path $setupPath)) {
+            Write-Host "Installer path not found: $setupPath" -ForegroundColor Red
+            Exit 1
+        }
+
+        $sqlVersion = Get-SqlVersion -installerPath $setupPath
+        $updateDirectory = Get-UpdateDirectory -version $sqlVersion
+        $updateSourcePath = "$scriptDir\Updates\$updateDirectory"
+
+        return @{ 
+            SetupPath        = $setupPath 
+            DriveLetter      = $driveLetter 
+            SqlVersion       = $sqlVersion 
+            UpdateSourcePath = $updateSourcePath 
+        }
+    }
+    catch {
+        Write-Host "Failed to determine installer details." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        Exit 1
+    }
+}
+
+# Function to unmount ISO if it was used
+function Dismount-IfIso {
+    param (
+        [string]$installerPath
+    )
+
+    if ([System.IO.Path]::GetExtension($installerPath).ToLower() -eq ".iso") {
+        Dismount-Iso -isoPath $installerPath
+    }
+}
+
+# Function to invoke SQL scripts from an order file
+function Invoke-SqlScriptsFromOrderFile {
+    param (
+        [string]$orderFile,
+        [string]$scriptDirectory,
+        [string]$server,
+        [bool]$debugMode
+    )
+
+    # Read order file
+    $orderList = Get-Content -Path $orderFile
+
+    foreach ($entry in $orderList) {
+        # Split the database and file name
+        $parts = $entry -split ":"
+        $databaseName = $parts[0]
+        $fileName = $parts[1]
+        $filePath = Join-Path -Path $scriptDirectory -ChildPath $fileName
+
+        if (Test-Path $filePath) {
+            # Read the contents of the SQL file
+            $scriptContent = Get-Content -Path $filePath -Raw
+
+            try {
+                # Invoke the SQL script against the specified database
+                Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent
+                Write-Output "Successfully executed script: $fileName on database: $databaseName"
+                if ($debugMode) { Write-Debug "Successfully executed script: $fileName on database: $databaseName" }
+            }
+            catch {
+                Write-Output "Failed to execute script: $fileName on database: $databaseName"
+                Write-Output $_.Exception.Message
+                if ($debugMode) { Write-Debug "Failed to execute script: $fileName on database: $databaseName. Error: $_" }
+                Exit 1
+            }
+        }
+        else {
+            Write-Output "File not found: $fileName"
+            if ($debugMode) { Write-Debug "File not found: $fileName in path: $filePath" }
+            Exit 1
+        }
+    }
+}
 
 # Main Script Execution
 
@@ -577,35 +676,12 @@ if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
 # Read passwords and store them securely
 Read-Passwords
 
-# Determine installer path
-try {
-    $installerDetails = Get-InstallerPath -installerPath $sqlInstallerLocalPath
-    $installerPath = $installerDetails[0]
-    $driveLetter = $installerDetails[1]
-    
-    # Check if installer path exists
-    if (-Not (Test-Path -Path $installerPath)) {
-        Write-Host "Installer path not found: $installerPath" -ForegroundColor Red
-        Exit 1
-    }
-}
-catch {
-    Write-Host "Failed to determine installer path." -ForegroundColor Red
-    Write-Host "Error details: $_"
-    Exit 1
-}
+# Determine installer path, SQL version, and update directory
+$installerDetails = Get-SqlInstallerDetails -installerPath $sqlInstallerLocalPath -scriptDir $scriptDir
 
-# Get SQL version and update directory
-try {
-    $sqlVersion = Get-SqlVersion -installerPath $installerPath
-    $updateDirectory = Get-UpdateDirectory -version $sqlVersion
-    $updateSourcePath = "$scriptDir\Updates\$updateDirectory"
-}
-catch {
-    Write-Host "Failed to get SQL Server version or update directory." -ForegroundColor Red
-    Write-Host "Error details: $_"
-    Exit 1
-}
+$installerPath = $installerDetails.SetupPath
+$driveLetter = $installerDetails.DriveLetter
+$updateSourcePath = $installerDetails.UpdateSourcePath
 
 # SQL Server Installation Parameters
 $installParams = @{
@@ -678,43 +754,10 @@ if ($debugMode) {
 Test-RebootRequirement -warnings $installWarning
 
 # Unmount ISO if it was used
-if ([System.IO.Path]::GetExtension($sqlInstallerLocalPath).ToLower() -eq ".iso") {
-    Dismount-Iso -isoPath $sqlInstallerLocalPath
-}
+Dismount-IfIso -installerPath $sqlInstallerLocalPath
 
-# Read order file
-$orderList = Get-Content -Path $orderFile
-
-foreach ($entry in $orderList) {
-    # Split the database and file name
-    $parts = $entry -split ":"
-    $databaseName = $parts[0]
-    $fileName = $parts[1]
-    $filePath = Join-Path -Path $scriptDirectory -ChildPath $fileName
-
-    if (Test-Path $filePath) {
-        # Read the contents of the SQL file
-        $scriptContent = Get-Content -Path $filePath -Raw
-
-        try {
-            # Execute the SQL script against the specified database
-            Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent
-            Write-Output "Successfully executed script: $fileName on database: $databaseName"
-            if ($debugMode) { Write-Debug "Successfully executed script: $fileName on database: $databaseName" }
-        }
-        catch {
-            Write-Output "Failed to execute script: $fileName on database: $databaseName"
-            Write-Output $_.Exception.Message
-            if ($debugMode) { Write-Debug "Failed to execute script: $fileName on database: $databaseName. Error: $_" }
-            Exit 1
-        }
-    }
-    else {
-        Write-Output "File not found: $fileName"
-        if ($debugMode) { Write-Debug "File not found: $fileName in path: $filePath" }
-        Exit 1
-    }
-}
+# Invoke SQL scripts from the order file
+Invoke-SqlScriptsFromOrderFile -orderFile $orderFile -scriptDirectory $scriptDirectory -server $server -debugMode $debugMode
 
 # Show progress message for verifying SQL script execution
 Show-ProgressMessage -message "Verifying SQL script execution..."
@@ -844,7 +887,9 @@ if ($debugMode) {
 Write-Host ""
 
 # Add additional info for the end user when installation is complete
-Write-Host "Info about:"
-Write-Host "- gdfgdgdg"
-Write-Host "- dfggdfgdg"
-Write-Host "- fdgdfgdgdfg"
+Write-Host "Installation Complete! Here is some additional information:"
+Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\150\Setup Bootstrap\Log"
+Write-Host "- Verification: Verify the installation by connecting to the SQL Server instance using SQL Server Management Studio (SSMS)"
+Write-Host "  or using the command: `sqlcmd -S <YourServerName> -Q 'SELECT @@VERSION'"
+Write-Host "- Post-Installation Steps: Ensure to review and implement security best practices, configure regular backups, and monitor your SQL Server instance."
+Write-Host "- Resources: For further assistance, refer to the official documentation: https://docs.microsoft.com/en-us/sql/sql-server/"
