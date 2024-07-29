@@ -3,20 +3,33 @@
     Automates the installation and configuration of SQL Server, including additional setup tasks and optional SSMS installation.
 
 .DESCRIPTION
-    This script is designed to streamline the installation and configuration of SQL Server. It includes mounting the SQL Server ISO, configuring SQL Server instance settings, applying necessary updates, and executing SQL scripts in a specified order. The script ensures best practices such as checking volume block sizes and setting SQL Server configurations for optimal performance.
+    This script streamlines the installation and configuration of SQL Server. It mounts the SQL Server ISO, configures instance settings, applies necessary updates, and executes SQL scripts in a specified order. The script adheres to best practices, such as checking volume block sizes and optimizing SQL Server configurations for performance.
 
-    Features:
-    - Mounts SQL Server ISO and retrieves the setup executable.
+    Key Features:
+    - Mounts the SQL Server ISO and retrieves the setup executable.
     - Installs SQL Server with specified configurations.
     - Configures TempDB settings, error log settings, and other SQL Server parameters.
     - Executes a series of SQL scripts in a specified order.
-    - Checks for and installs SQL Server Management Studio (SSMS) if requested.
-    - Ensures SQL Server Agent is running and applies any required updates.
-    - Uses relative paths to maintain flexibility in script and directory locations.
-    - Provides secure prompts for sensitive information like passwords.
+    - Checks for and optionally installs SQL Server Management Studio (SSMS).
+    - Ensures SQL Server Agent is running and applies any necessary updates.
+    - Utilizes relative paths for flexibility in script and directory locations.
+    - Provides secure prompts for sensitive information, such as passwords.
 
-    The script assumes the directory structure is consistent, with all necessary files organized within the `sqlzetup` folder. It dynamically adapts to the root location of this folder, allowing for flexibility in deployment locations.
-    
+    The script assumes a consistent directory structure, with all necessary files organized within the `sqlsetup` folder. It dynamically adapts to the root location of this folder, allowing for flexible deployment.
+
+    Supported SQL Server Versions:
+    - 2016
+    - 2017
+    - 2019
+    - 2022
+
+    Supported Editions:
+    - Developer (for test and development)
+    - Standard
+    - Enterprise
+
+    This script is open-source and licensed under the MIT License.
+
 .AUTHOR
     Michael Pettersson
 
@@ -28,51 +41,40 @@
 $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 
 # User Configurable Parameters
+[string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso" # Change name
+[string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe" # Change name if needed
 [string]$edition = "Developer"
 [string]$productKey = $null
+[string]$SqlDataDir = "E:\MSSQL\Data"
+[string]$SqlLogDir = "F:\MSSQL\Log"
+[string]$SqlBackupDir = "H:\MSSQL\Backup"
+[ValidateRange(512, [int]::MaxValue)]
+[int]$TempdbDataFileSize = 512 # MB - this is the full tempdb datafile(s) size divided over several files
+[ValidateRange(64, [int]::MaxValue)]
+[int]$TempdbLogFileSize = 64
+[int]$TempdbDataFileGrowth = 128
+[int]$TempdbLogFileGrowth = 64
 [bool]$installSsms = $false
-[int]$TempdbDataFileSize = 200 # MB - this is the full tempdb datafile(s) size divided over several files
-[int]$TempdbLogFileSize = 50 # MB
-[int]$TempdbDataFileGrowth = 100 # MB
-[int]$TempdbLogFileGrowth = 100 # MB
-[string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso" # Change name
 [bool]$debugMode = $false
 
-# Parameters not likely to change
+# Statis parameters
 [string]$server = $env:COMPUTERNAME
 [string]$tableName = "CommandLog"
-[string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe"
 
 # Configuration for paths
 $config = @{
     SqlTempDbLogDir       = "F:\MSSQL\Log"
     SqlTempDbDir          = "G:\MSSQL\Data"
-    SqlTempDbFileCount    = 1 # Number of Database Engine TempDB files. Will change automatically later.
+    SqlTempDbFileCount    = 1 # Will change automatically later to reflect core count in machine
     BrowserSvcStartupType = "Disabled"
     NpEnabled             = 0
     TcpEnabled            = 1
     SqlSvcAccount         = "agdemo\sqlengine"
     SqlSvcPassword        = $null
-    AgtSvcAccount         = $null # "agdemo\sqlagent"
+    AgtSvcAccount         = $null # Specifying $null = SqlSvcAccount # "agdemo\sqlagent"
     AgtSvcPassword        = $null
     SaPwd                 = $null
 }
-
-# Define variables
-[string]$scriptDirectory = "$scriptDir\Sql"
-[string]$orderFile = "$scriptDir\order.txt"
-
-# Verification query
-[string]$verificationQuery = @"
-IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$tableName')
-BEGIN
-    SELECT 'Table exists' AS Column1
-END
-ELSE
-BEGIN
-    SELECT 'Table does not exist' AS Column1
-END
-"@
 
 # Functions
 
@@ -466,24 +468,100 @@ function Read-Passwords {
     $config.SaPwd = $saCredential.GetNetworkCredential().Password
 }
 
+# Function to test TempDB sizes
+function Test-TempDbSizes {
+    param (
+        [int]$TempdbDataFileSize,
+        [int]$TempdbLogFileSize
+    )
+
+    if ($TempdbDataFileSize -lt 512) {
+        throw "TempdbDataFileSize must be at least 512 MB."
+    }
+    if ($TempdbLogFileSize -lt 64) {
+        throw "TempdbLogFileSize must be at least 64 MB."
+    }
+}
+
+# Function to set variables and verification query
+function Set-Variables {
+    param (
+        [string]$scriptDir,
+        [string]$tableName
+    )
+
+    # Define variables
+    [string]$scriptDirectory = "$scriptDir\Sql"
+    [string]$orderFile = "$scriptDir\order.txt"
+
+    # Verification query
+    [string]$verificationQuery = @"
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '$tableName')
+BEGIN
+    SELECT 'Table exists' AS Column1
+END
+ELSE
+BEGIN
+    SELECT 'Table does not exist' AS Column1
+END
+"@
+
+    return @{
+        scriptDirectory   = $scriptDirectory
+        orderFile         = $orderFile
+        verificationQuery = $verificationQuery
+    }
+}
+
+# Function to restart SQL Server services
+function Restart-SqlServices {
+    param (
+        [string]$server,
+        [bool]$debugMode
+    )
+
+    Show-ProgressMessage -message "Restarting SQL Server services to apply settings..."
+    try {
+        Restart-DbaService -SqlInstance $server -Type Engine, Agent -Confirm:$false
+        Write-Host "SQL Server services restarted successfully." -ForegroundColor Green
+        if ($debugMode) { Write-Debug "SQL Server services restarted successfully on server $server" }
+    }
+    catch {
+        Write-Host "Failed to restart SQL Server services." -ForegroundColor Red
+        Write-Host "Error Details: $_"
+        if ($debugMode) { Write-Debug "Failed to restart SQL Server services on server $server. Error details: $_" }
+        Exit 1
+    }
+}
+
+
 # Main Script Execution
 
 # Initialize the dbatools module
 Initialize-DbatoolsModule
+
+# Set Variables for Script Execution and Configuration
+$variables = Set-Variables -scriptDir $scriptDir -tableName $tableName
+$scriptDirectory = $variables.scriptDirectory
+$orderFile = $variables.orderFile
+$verificationQuery = $variables.verificationQuery
 
 # Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
 if ($null -eq $config.AgtSvcAccount) {
     $config.AgtSvcAccount = $config.SqlSvcAccount
 }
 
+# Test TempDB sizes
+Test-TempDbSizes -TempdbDataFileSize $TempdbDataFileSize -TempdbLogFileSize $TempdbLogFileSize
+
 # Show progress message for verifying volume block sizes
 Show-ProgressMessage -message "Verifying volume block sizes..."
 $volumePaths = @(
     $config.SqlTempDbLogDir,
     $config.SqlTempDbDir,
-    "E:\MSSQL\Data",
-    "F:\MSSQL\Log",
-    "H:\MSSQL\Backup"
+    $SqlDataDir,
+    $SqlLogDir,
+    $SqlBackupDir
 )
 
 # Test volume block sizes and handle user decision if sizes are not correct
@@ -750,19 +828,8 @@ else {
 Show-ProgressMessage -message "Verifying if updates were applied..."
 Test-UpdatesApplied -updateSourcePath $updateSourcePath
 
-# Restart SQL Server services to apply trace flags and other settings
-Show-ProgressMessage -message "Restarting SQL Server services to apply settings..."
-try {
-    Restart-DbaService -SqlInstance $server -Type Engine, Agent -Confirm:$false
-    Write-Host "SQL Server services restarted successfully." -ForegroundColor Green
-    if ($debugMode) { Write-Debug "SQL Server services restarted successfully on server $server" }
-}
-catch {
-    Write-Host "Failed to restart SQL Server services." -ForegroundColor Red
-    Write-Host "Error Details: $_"
-    if ($debugMode) { Write-Debug "Failed to restart SQL Server services on server $server. Error details: $_" }
-    Exit 1
-}
+# Restart SQL Server services to apply settings
+Restart-SqlServices -server $server -debugMode $debugMode
 
 # Verify if SQL Server Agent is running
 Start-SqlServerAgent -DebugMode $debugMode
