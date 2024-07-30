@@ -1,3 +1,4 @@
+# Main script
 <#
 .SYNOPSIS
     Automates the installation and configuration of SQL Server, including additional setup tasks and optional SSMS installation.
@@ -43,13 +44,20 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 # User Configurable Parameters
 [string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso"
 [string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe"
+[int]$Version = 2022
 [string]$edition = "Developer"
 [string]$productKey = $null
+[string]$DataPath = "E:\MSSQL\Data"
+[string]$LogPath = "F:\MSSQL\Log"
+[string]$BackupPath = "H:\MSSQL\Backup"
+[string]$SqlCollation = "Finnish_Swedish_CI_AS"
+[int]$Port = 1433
+[string]$AdminAccount = "agdemo\sqlgroup"
 [string]$SqlDataDir = "E:\MSSQL\Data"
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
 [string]$SqlTempDbLogDir = "F:\MSSQL\Log"
-[string]$SqlTempDbDir = "G:\MSSQL\Data" 
+[string]$SqlTempDbDir = "G:\MSSQL\Data"
 [ValidateSet("Automatic", "Disabled", "Manual")]
 [string]$BrowserSvcStartupType = "Disabled"
 [ValidateSet(0, 1)]
@@ -65,25 +73,24 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [bool]$installSsms = $false
 [bool]$debugMode = $false
 
-# Statis parameters
-[string]$server = $env:COMPUTERNAME
-[string]$tableName = "CommandLog"
-[int]$SqlTempDbFileCount = 1
-
-# Configuration for paths
 $config = @{
+    SqlSvcAccount         = "agdemo\sqlengine"
+    AgtSvcAccount         = $null # Specifying $null = SqlSvcAccount # "agdemo\sqlagent"
     SqlTempDbLogDir       = $SqlTempDbLogDir
     SqlTempDbDir          = $SqlTempDbDir
-    SqlTempDbFileCount    = $SqlTempDbFileCount
+    SqlTempDbFileCount    = $SqlTempDbFileCount # Ensure SqlTempDbFileCount is included
     BrowserSvcStartupType = $BrowserSvcStartupType
     NpEnabled             = $NpEnabled
     TcpEnabled            = $TcpEnabled
-    SqlSvcAccount         = "agdemo\sqlengine"
     SqlSvcPassword        = $null
-    AgtSvcAccount         = $null # Specifying $null = SqlSvcAccount # "agdemo\sqlagent"
     AgtSvcPassword        = $null
     SaPwd                 = $null
 }
+
+# Static parameters
+[string]$server = $env:COMPUTERNAME
+[string]$tableName = "CommandLog"
+[int]$SqlTempDbFileCount = 1 # Added the SqlTempDbFileCount parameter
 
 # Functions
 
@@ -647,24 +654,24 @@ function Invoke-SqlServerInstallation {
     # SQL Server Installation Parameters
     $installParams = @{
         SqlInstance                   = $server
-        Version                       = 2022
+        Version                       = $Version
         Verbose                       = $false
         Confirm                       = $false
         Feature                       = "Engine"
         InstancePath                  = "C:\Program Files\Microsoft SQL Server"
-        DataPath                      = "E:\MSSQL\Data"
-        LogPath                       = "F:\MSSQL\Log"
-        BackupPath                    = "H:\MSSQL\Backup"
+        DataPath                      = $DataPath
+        LogPath                       = $LogPath
+        BackupPath                    = $BackupPath
         Path                          = "${driveLetter}:\"
         InstanceName                  = "MSSQLSERVER"
         AgentCredential               = $sqlAgentCredential
-        SqlCollation                  = "Finnish_Swedish_CI_AS"
-        AdminAccount                  = "agdemo\sqlgroup"
+        SqlCollation                  = $SqlCollation
+        AdminAccount                  = $AdminAccount
         UpdateSourcePath              = $updateSourcePath
         PerformVolumeMaintenanceTasks = $true
         AuthenticationMode            = "Mixed"
         EngineCredential              = $sqlServiceCredential
-        Port                          = 1433
+        Port                          = $Port
         SaCredential                  = $saCredential
         Configuration                 = $config
     }
