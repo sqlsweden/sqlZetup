@@ -843,16 +843,31 @@ function Show-FinalMessage {
     if ($debugMode) { 
         Write-Debug "SQL Server installation and configuration completed successfully on server $server" 
     }
+
+    # Get SQL version directory from the installer details
+    $sqlVersionDirectory = switch ($Version) {
+        2016 { "130" }
+        2017 { "140" }
+        2019 { "150" }
+        2022 { "160" }
+        default { 
+            Write-Host "Unsupported SQL Server version: $Version" -ForegroundColor Red
+            if ($debugMode) { Write-Debug "Unsupported SQL Server version: $Version" }
+            throw "Unsupported SQL Server version: $Version" 
+        }
+    }
+
     # Add an empty line for line break
     Write-Host ""
     # Add additional info for the end user when installation is complete
     Write-Host "Installation Complete! Here is some additional information:"
-    Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\150\Setup Bootstrap\Log"
+    Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log"
     Write-Host "- Verification: Verify the installation by connecting to the SQL Server instance using SQL Server Management Studio (SSMS)"
     Write-Host "  or using the command: `sqlcmd -S <YourServerName> -Q 'SELECT @@VERSION'"
     Write-Host "- Post-Installation Steps: Ensure to review and implement security best practices, configure regular backups, and monitor your SQL Server instance."
     Write-Host "- Resources: For further assistance, refer to the official documentation: https://docs.microsoft.com/en-us/sql/sql-server/"
 }
+
 
 # Main Function to install and configure SQL Server
 function Invoke-InstallSqlServer {
