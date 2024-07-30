@@ -72,6 +72,7 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [int]$TempdbLogFileGrowth = 64
 [bool]$installSsms = $false
 [bool]$debugMode = $false
+[int]$SqlTempDbFileCount = 1
 
 $config = @{
     SqlSvcAccount         = "agdemo\sqlengine"
@@ -90,7 +91,6 @@ $config = @{
 # Static parameters
 [string]$server = $env:COMPUTERNAME
 [string]$tableName = "CommandLog"
-[int]$SqlTempDbFileCount = 1 # Added the SqlTempDbFileCount parameter
 
 # Functions
 
