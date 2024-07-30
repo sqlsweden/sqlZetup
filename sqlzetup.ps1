@@ -477,7 +477,7 @@ function Read-Passwords {
     $config.SaPwd = $saCredential.GetNetworkCredential().Password
 }
 
-# Function to test TempDB sizes
+# Function to test TempDb sizes
 function Test-TempDbSizes {
     param (
         [int]$TempdbDataFileSize,
@@ -634,262 +634,304 @@ function Invoke-SqlScriptsFromOrderFile {
     }
 }
 
-# Main Script Execution
+# Function to invoke SQL Server installation
+function Invoke-SqlServerInstallation {
+    param (
+        [string]$installerPath,
+        [string]$updateSourcePath,
+        [string]$driveLetter,
+        [string]$server,
+        [bool]$debugMode
+    )
 
-# Initialize the dbatools module
-Initialize-DbatoolsModule
+    # SQL Server Installation Parameters
+    $installParams = @{
+        SqlInstance                   = $server
+        Version                       = 2022
+        Verbose                       = $false
+        Confirm                       = $false
+        Feature                       = "Engine"
+        InstancePath                  = "C:\Program Files\Microsoft SQL Server"
+        DataPath                      = "E:\MSSQL\Data"
+        LogPath                       = "F:\MSSQL\Log"
+        BackupPath                    = "H:\MSSQL\Backup"
+        Path                          = "${driveLetter}:\"
+        InstanceName                  = "MSSQLSERVER"
+        AgentCredential               = $sqlAgentCredential
+        SqlCollation                  = "Finnish_Swedish_CI_AS"
+        AdminAccount                  = "agdemo\sqlgroup"
+        UpdateSourcePath              = $updateSourcePath
+        PerformVolumeMaintenanceTasks = $true
+        AuthenticationMode            = "Mixed"
+        EngineCredential              = $sqlServiceCredential
+        Port                          = 1433
+        SaCredential                  = $saCredential
+        Configuration                 = $config
+    }
 
-# Set Variables for Script Execution and Configuration
-$variables = Set-Variables -scriptDir $scriptDir -tableName $tableName
-$scriptDirectory = $variables.scriptDirectory
-$orderFile = $variables.orderFile
-$verificationQuery = $variables.verificationQuery
+    # Conditionally add the PID to the install parameters if it's needed
+    if ($edition -ne "Developer") {
+        if ($null -eq $productKey) {
+            Write-Host "Product key is required for Standard and Enterprise editions." -ForegroundColor Red
+            if ($debugMode) { Write-Debug "Product key is required for Standard and Enterprise editions." }
+            Exit 1
+        }
+        $installParams.Pid = $productKey
+    }
 
-# Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
-if ($null -eq $config.AgtSvcAccount) {
-    $config.AgtSvcAccount = $config.SqlSvcAccount
-}
+    # Set verbose preference based on DebugMode
+    if ($debugMode) {
+        $VerbosePreference = "Continue"
+    }
+    else {
+        $VerbosePreference = "SilentlyContinue"
+    }
 
-# Test TempDB sizes
-Test-TempDbSizes -TempdbDataFileSize $TempdbDataFileSize -TempdbLogFileSize $TempdbLogFileSize
-
-# Show progress message for verifying volume block sizes
-Show-ProgressMessage -message "Verifying volume block sizes..."
-$volumePaths = @(
-    $config.SqlTempDbLogDir,
-    $config.SqlTempDbDir,
-    $SqlDataDir,
-    $SqlLogDir,
-    $SqlBackupDir
-)
-
-# Test volume block sizes and handle user decision if sizes are not correct
-if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
-    $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
-    if ($userInput -ne 'Y') {
-        Write-Host "Installation cancelled by user." -ForegroundColor Red
-        if ($debugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
+    # Show progress message for starting SQL Server installation
+    Show-ProgressMessage -message "Starting SQL Server installation..."
+    try {
+        Invoke-Command {
+            Install-DbaInstance @installParams
+        } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false
+    }
+    catch {
+        Write-Host "SQL Server installation failed with an error. Exiting script." -ForegroundColor Red
+        Write-Host "Error Details: $_"
+        if ($debugMode) { Write-Debug "SQL Server installation failed. Error details: $_" }
         Exit 1
     }
+
+    # Capture and suppress detailed output, only show if debugMode is enabled
+    if ($debugMode) {
+        Write-Host "Installation Output:"
+        $installOutput
+        Write-Host "Installation Errors:"
+        $installError
+        Write-Host "Installation Warnings:"
+        $installWarning
+    }
+
+    # Check install warning for a reboot requirement message
+    Test-RebootRequirement -warnings $installWarning
 }
 
-# Read passwords and store them securely
-Read-Passwords
+# Function to set SQL Server settings
+function Set-SqlServerSettings {
+    param (
+        [string]$server,
+        [bool]$debugMode
+    )
 
-# Determine installer path, SQL version, and update directory
-$installerDetails = Get-SqlInstallerDetails -installerPath $sqlInstallerLocalPath -scriptDir $scriptDir
+    Show-ProgressMessage -message "Starting additional configuration steps..."
 
-$installerPath = $installerDetails.SetupPath
-$driveLetter = $installerDetails.DriveLetter
-$updateSourcePath = $installerDetails.UpdateSourcePath
+    # Log each configuration step with verbose and debug output
+    Show-ProgressMessage -message "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections..."
+    Get-DbaSpConfigure -SqlInstance $server -Name 'backup compression default', 'optimize for ad hoc workloads', 'remote admin connections' |
+    ForEach-Object {
+        Set-DbaSpConfigure -SqlInstance $server -Name $_.Name -Value 1
+        if ($debugMode) { Write-Debug "Configured $($_.Name) to 1 on server $server" }
+    }
 
-# SQL Server Installation Parameters
-$installParams = @{
-    SqlInstance                   = $server
-    Version                       = 2022
-    Verbose                       = $false
-    Confirm                       = $false
-    Feature                       = "Engine"
-    InstancePath                  = "C:\Program Files\Microsoft SQL Server"
-    DataPath                      = "E:\MSSQL\Data"
-    LogPath                       = "F:\MSSQL\Log"
-    BackupPath                    = "H:\MSSQL\Backup"
-    Path                          = "${driveLetter}:\"
-    InstanceName                  = "MSSQLSERVER"
-    AgentCredential               = $sqlAgentCredential
-    SqlCollation                  = "Finnish_Swedish_CI_AS"
-    AdminAccount                  = "agdemo\sqlgroup"
-    UpdateSourcePath              = $updateSourcePath
-    PerformVolumeMaintenanceTasks = $true
-    AuthenticationMode            = "Mixed"
-    EngineCredential              = $sqlServiceCredential
-    Port                          = 1433
-    SaCredential                  = $saCredential
-    Configuration                 = $config
-}
+    Show-ProgressMessage -message "Setting cost threshold for parallelism..."
+    Set-DbaSpConfigure -SqlInstance $server -Name 'cost threshold for parallelism' -Value 75
+    if ($debugMode) { Write-Debug "Set 'cost threshold for parallelism' to 75 on server $server" }
 
-# Conditionally add the PID to the install parameters if it's needed
-if ($edition -ne "Developer") {
-    if ($null -eq $productKey) {
-        Write-Host "Product key is required for Standard and Enterprise editions." -ForegroundColor Red
-        if ($debugMode) { Write-Debug "Product key is required for Standard and Enterprise editions." }
+    Show-ProgressMessage -message "Setting recovery interval (min)..."
+    Set-DbaSpConfigure -SqlInstance $server -Name 'recovery interval (min)' -Value 60
+    if ($debugMode) { Write-Debug "Set 'recovery interval (min)' to 60 on server $server" }
+
+    Show-ProgressMessage -message "Configuring startup parameter for TraceFlag 3226..."
+    Set-DbaStartupParameter -SqlInstance $server -TraceFlag 3226 -Confirm:$false
+    if ($debugMode) { Write-Debug "Configured startup parameter TraceFlag 3226 on server $server" }
+
+    Show-ProgressMessage -message "Setting max memory..."
+    Set-DbaMaxMemory -SqlInstance $server
+    if ($debugMode) { Write-Debug "Set max memory on server $server" }
+
+    Show-ProgressMessage -message "Setting max degree of parallelism..."
+    Set-DbaMaxDop -SqlInstance $server
+    if ($debugMode) { Write-Debug "Set max degree of parallelism on server $server" }
+
+    Show-ProgressMessage -message "Configuring power plan..."
+    Set-DbaPowerPlan -ComputerName $server
+    if ($debugMode) { Write-Debug "Configured power plan on server $server" }
+
+    Show-ProgressMessage -message "Configuring error log settings..."
+    Set-DbaErrorLogConfig -SqlInstance $server -LogCount 60 -LogSize 500
+    if ($debugMode) { Write-Debug "Configured error log settings (LogCount: 60, LogSize: 500MB) on server $server" }
+
+    Show-ProgressMessage -message "Configuring database file growth settings for 'master' database..."
+    Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Data -GrowthType MB -Growth 128
+    Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Log -GrowthType MB -Growth 64
+    if ($debugMode) { Write-Debug "Configured 'master' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
+
+    Show-ProgressMessage -message "Configuring database file growth settings for 'msdb' database..."
+    Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Data -GrowthType MB -Growth 128
+    Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Log -GrowthType MB -Growth 64
+    if ($debugMode) { Write-Debug "Configured 'msdb' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
+
+    Show-ProgressMessage -message "Configuring database file growth settings for 'model' database..."
+    Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Data -GrowthType MB -Growth 128
+    Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Log -GrowthType MB -Growth 64
+    if ($debugMode) { Write-Debug "Configured 'model' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
+
+    Show-ProgressMessage -message "Configuring SQL Agent server settings..."
+    try {
+        Set-DbaAgentServer -SqlInstance $server -MaximumJobHistoryRows 0 -MaximumHistoryRows -1 -ReplaceAlertTokens Enabled
+        if ($debugMode) { Write-Debug "Configured SQL Agent server settings on server $server" }
+    }
+    catch {
+        Write-Host "Warning: Failed to configure SQL Agent server settings. Ensure 'Agent XPs' is enabled." -ForegroundColor Yellow
+        Write-Host "Error details: $_"
+        if ($debugMode) { Write-Debug "Failed to configure SQL Agent server settings on server $server. Error details: $_" }
         Exit 1
     }
-    $installParams.Pid = $productKey
-}
 
-# Set verbose preference based on DebugMode
-if ($debugMode) {
-    $VerbosePreference = "Continue"
-}
-else {
-    $VerbosePreference = "SilentlyContinue"
-}
+    # Get the number of CPU cores
+    $cpuCores = (Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 
-# Show progress message for starting SQL Server installation
-Show-ProgressMessage -message "Starting SQL Server installation..."
-try {
-    Invoke-Command {
-        Install-DbaInstance @installParams
-    } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false
-}
-catch {
-    Write-Host "SQL Server installation failed with an error. Exiting script." -ForegroundColor Red
-    Write-Host "Error Details: $_"
-    if ($debugMode) { Write-Debug "SQL Server installation failed. Error details: $_" }
-    Exit 1
-}
+    # Set the variable to the number of cores or 8, whichever is lower
+    $maxCores = if ($cpuCores -gt 8) { 8 } else { $cpuCores }
 
-# Capture and suppress detailed output, only show if debugMode is enabled
-if ($debugMode) {
-    Write-Host "Installation Output:"
-    $installOutput
-    Write-Host "Installation Errors:"
-    $installError
-    Write-Host "Installation Warnings:"
-    $installWarning
-}
-
-# Check install warning for a reboot requirement message
-Test-RebootRequirement -warnings $installWarning
-
-# Unmount ISO if it was used
-Dismount-IfIso -installerPath $sqlInstallerLocalPath
-
-# Invoke SQL scripts from the order file
-Invoke-SqlScriptsFromOrderFile -orderFile $orderFile -scriptDirectory $scriptDirectory -server $server -debugMode $debugMode
-
-# Show progress message for verifying SQL script execution
-Show-ProgressMessage -message "Verifying SQL script execution..."
-Test-SqlExecution -serverInstance $server -databaseName "master" -query $verificationQuery
-
-# Additional Configuration Steps
-Show-ProgressMessage -message "Starting additional configuration steps..."
-
-# Log each configuration step with verbose and debug output
-Show-ProgressMessage -message "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections..."
-Get-DbaSpConfigure -SqlInstance $server -Name 'backup compression default', 'optimize for ad hoc workloads', 'remote admin connections' |
-ForEach-Object {
-    Set-DbaSpConfigure -SqlInstance $server -Name $_.Name -Value 1
-    if ($debugMode) { Write-Debug "Configured $($_.Name) to 1 on server $server" }
-}
-
-Show-ProgressMessage -message "Setting cost threshold for parallelism..."
-Set-DbaSpConfigure -SqlInstance $server -Name 'cost threshold for parallelism' -Value 75
-if ($debugMode) { Write-Debug "Set 'cost threshold for parallelism' to 75 on server $server" }
-
-Show-ProgressMessage -message "Setting recovery interval (min)..."
-Set-DbaSpConfigure -SqlInstance $server -Name 'recovery interval (min)' -Value 60
-if ($debugMode) { Write-Debug "Set 'recovery interval (min)' to 60 on server $server" }
-
-Show-ProgressMessage -message "Configuring startup parameter for TraceFlag 3226..."
-Set-DbaStartupParameter -SqlInstance $server -TraceFlag 3226 -Confirm:$false
-if ($debugMode) { Write-Debug "Configured startup parameter TraceFlag 3226 on server $server" }
-
-Show-ProgressMessage -message "Setting max memory..."
-Set-DbaMaxMemory -SqlInstance $server
-if ($debugMode) { Write-Debug "Set max memory on server $server" }
-
-Show-ProgressMessage -message "Setting max degree of parallelism..."
-Set-DbaMaxDop -SqlInstance $server
-if ($debugMode) { Write-Debug "Set max degree of parallelism on server $server" }
-
-Show-ProgressMessage -message "Configuring power plan..."
-Set-DbaPowerPlan -ComputerName $server
-if ($debugMode) { Write-Debug "Configured power plan on server $server" }
-
-Show-ProgressMessage -message "Configuring error log settings..."
-Set-DbaErrorLogConfig -SqlInstance $server -LogCount 60 -LogSize 500
-if ($debugMode) { Write-Debug "Configured error log settings (LogCount: 60, LogSize: 500MB) on server $server" }
-
-Show-ProgressMessage -message "Configuring database file growth settings for 'master' database..."
-Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Data -GrowthType MB -Growth 128
-Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Log -GrowthType MB -Growth 64
-if ($debugMode) { Write-Debug "Configured 'master' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
-
-Show-ProgressMessage -message "Configuring database file growth settings for 'msdb' database..."
-Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Data -GrowthType MB -Growth 128
-Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Log -GrowthType MB -Growth 64
-if ($debugMode) { Write-Debug "Configured 'msdb' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
-
-Show-ProgressMessage -message "Configuring database file growth settings for 'model' database..."
-Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Data -GrowthType MB -Growth 128
-Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Log -GrowthType MB -Growth 64
-if ($debugMode) { Write-Debug "Configured 'model' database files growth settings (Data:128MB, Log: 64MB) on server $server" }
-
-Show-ProgressMessage -message "Configuring SQL Agent server settings..."
-try {
-    Set-DbaAgentServer -SqlInstance $server -MaximumJobHistoryRows 0 -MaximumHistoryRows -1 -ReplaceAlertTokens Enabled
-    if ($debugMode) { Write-Debug "Configured SQL Agent server settings on server $server" }
-}
-catch {
-    Write-Host "Warning: Failed to configure SQL Agent server settings. Ensure 'Agent XPs' is enabled." -ForegroundColor Yellow
-    Write-Host "Error details: $_"
-    if ($debugMode) { Write-Debug "Failed to configure SQL Agent server settings on server $server. Error details: $_" }
-    Exit 1
-}
-
-# Get the number of CPU cores
-$cpuCores = (Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
-
-# Set the variable to the number of cores or 8, whichever is lower
-$maxCores = if ($cpuCores -gt 8) { 8 } else { $cpuCores }
-
-# Show progress message for configuring TempDB
-Show-ProgressMessage -message "Configuring TempDB..."
-try {
-    # Configure TempDB with the determined number of cores
-    Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop
-    if ($debugMode) { Write-Debug "Configured TempDB on server $server with $maxCores data files" }
-}
-catch {
-    Write-Host "Warning: Failed to configure TempDB." -ForegroundColor Yellow
-    Write-Host "Error details: $_"
-    if ($debugMode) { Write-Debug "Failed to configure TempDB on server $server. Error details: $_" }
-    Exit 1
-}
-
-Show-ProgressMessage -message "Additional configuration steps completed."
-
-# Install SSMS if requested
-if ($installSsms) {
-    # Check if SSMS is already installed
-    if (Test-SsmsInstalled) {
-        Write-Host "SQL Server Management Studio (SSMS) is already installed. Exiting script." -ForegroundColor Red
-        if ($debugMode) { Write-Debug "SQL Server Management Studio (SSMS) is already installed." }
-        Exit 0
+    # Show progress message for configuring TempDB
+    Show-ProgressMessage -message "Configuring TempDB..."
+    try {
+        # Configure TempDB with the determined number of cores
+        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop
+        if ($debugMode) { Write-Debug "Configured TempDB on server $server with $maxCores data files" }
+    }
+    catch {
+        Write-Host "Warning: Failed to configure TempDB." -ForegroundColor Yellow
+        Write-Host "Error details: $_"
+        if ($debugMode) { Write-Debug "Failed to configure TempDB on server $server. Error details: $_" }
+        Exit 1
     }
 
-    Show-ProgressMessage -message "Installing SQL Server Management Studio (SSMS)..."
-    Install-Ssms -installerPath $ssmsInstallerPath
-}
-else {
-    Write-Host "SSMS installation not requested. Skipping SSMS installation." -ForegroundColor Yellow
-    if ($debugMode) { Write-Debug "SSMS installation not requested. Skipping SSMS installation." }
+    Show-ProgressMessage -message "Additional configuration steps completed."
 }
 
-Show-ProgressMessage -message "Verifying if updates were applied..."
-Test-UpdatesApplied -updateSourcePath $updateSourcePath
+# Function to install SQL Server Management Studio if requested
+function Install-SSMSIfRequested {
+    param (
+        [bool]$installSsms,
+        [string]$ssmsInstallerPath,
+        [bool]$debugMode
+    )
 
-# Restart SQL Server services to apply settings
-Restart-SqlServices -server $server -debugMode $debugMode
+    if ($installSsms) {
+        # Check if SSMS is already installed
+        if (Test-SsmsInstalled) {
+            Write-Host "SQL Server Management Studio (SSMS) is already installed. Exiting script." -ForegroundColor Red
+            if ($debugMode) { Write-Debug "SQL Server Management Studio (SSMS) is already installed." }
+            Exit 0
+        }
 
-# Verify if SQL Server Agent is running
-Start-SqlServerAgent -DebugMode $debugMode
-
-Write-Host "SQL Server installation and configuration completed successfully." -ForegroundColor Green
-
-if ($debugMode) { 
-    Write-Debug "SQL Server installation and configuration completed successfully on server $server" 
+        Show-ProgressMessage -message "Installing SQL Server Management Studio (SSMS)..."
+        Install-Ssms -installerPath $ssmsInstallerPath
+    }
+    else {
+        Write-Host "SSMS installation not requested. Skipping SSMS installation." -ForegroundColor Yellow
+        if ($debugMode) { Write-Debug "SSMS installation not requested. Skipping SSMS installation." }
+    }
 }
 
-# Add an empty line for line break
-Write-Host ""
+# Function to show final informational message
+function Show-FinalMessage {
+    Write-Host "SQL Server installation and configuration completed successfully." -ForegroundColor Green
+    if ($debugMode) { 
+        Write-Debug "SQL Server installation and configuration completed successfully on server $server" 
+    }
+    # Add an empty line for line break
+    Write-Host ""
+    # Add additional info for the end user when installation is complete
+    Write-Host "Installation Complete! Here is some additional information:"
+    Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\150\Setup Bootstrap\Log"
+    Write-Host "- Verification: Verify the installation by connecting to the SQL Server instance using SQL Server Management Studio (SSMS)"
+    Write-Host "  or using the command: `sqlcmd -S <YourServerName> -Q 'SELECT @@VERSION'"
+    Write-Host "- Post-Installation Steps: Ensure to review and implement security best practices, configure regular backups, and monitor your SQL Server instance."
+    Write-Host "- Resources: For further assistance, refer to the official documentation: https://docs.microsoft.com/en-us/sql/sql-server/"
+}
 
-# Add additional info for the end user when installation is complete
-Write-Host "Installation Complete! Here is some additional information:"
-Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\150\Setup Bootstrap\Log"
-Write-Host "- Verification: Verify the installation by connecting to the SQL Server instance using SQL Server Management Studio (SSMS)"
-Write-Host "  or using the command: `sqlcmd -S <YourServerName> -Q 'SELECT @@VERSION'"
-Write-Host "- Post-Installation Steps: Ensure to review and implement security best practices, configure regular backups, and monitor your SQL Server instance."
-Write-Host "- Resources: For further assistance, refer to the official documentation: https://docs.microsoft.com/en-us/sql/sql-server/"
+# Main Function to install and configure SQL Server
+function Invoke-InstallSqlServer {
+    # Initialize the dbatools module
+    Initialize-DbatoolsModule
+
+    # Set Variables for Script Execution and Configuration
+    $variables = Set-Variables -scriptDir $scriptDir -tableName $tableName
+    $scriptDirectory = $variables.scriptDirectory
+    $orderFile = $variables.orderFile
+    $verificationQuery = $variables.verificationQuery
+
+    # Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
+    if ($null -eq $config.AgtSvcAccount) {
+        $config.AgtSvcAccount = $config.SqlSvcAccount
+    }
+
+    # Test TempDB sizes
+    Test-TempDbSizes -TempdbDataFileSize $TempdbDataFileSize -TempdbLogFileSize $TempdbLogFileSize
+
+    # Show progress message for verifying volume block sizes
+    Show-ProgressMessage -message "Verifying volume block sizes..."
+    $volumePaths = @(
+        $config.SqlTempDbLogDir,
+        $config.SqlTempDbDir,
+        $SqlDataDir,
+        $SqlLogDir,
+        $SqlBackupDir
+    )
+
+    # Test volume block sizes and handle user decision if sizes are not correct
+    if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
+        $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
+        if ($userInput -ne 'Y') {
+            Write-Host "Installation cancelled by user." -ForegroundColor Red
+            if ($debugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
+            Exit 1
+        }
+    }
+
+    # Read passwords and store them securely
+    Read-Passwords
+
+    # Determine installer path, SQL version, and update directory
+    $installerDetails = Get-SqlInstallerDetails -installerPath $sqlInstallerLocalPath -scriptDir $scriptDir
+
+    $installerPath = $installerDetails.SetupPath
+    $driveLetter = $installerDetails.DriveLetter
+    $updateSourcePath = $installerDetails.UpdateSourcePath
+
+    # Invoke SQL Server installation
+    Invoke-SqlServerInstallation -installerPath $installerPath -updateSourcePath $updateSourcePath -driveLetter $driveLetter -server $server -debugMode $debugMode
+
+    # Unmount ISO if it was used
+    Dismount-IfIso -installerPath $sqlInstallerLocalPath
+
+    # Invoke SQL scripts from the order file
+    Invoke-SqlScriptsFromOrderFile -orderFile $orderFile -scriptDirectory $scriptDirectory -server $server -debugMode $debugMode
+
+    # Show progress message for verifying SQL script execution
+    Show-ProgressMessage -message "Verifying SQL script execution..."
+    Test-SqlExecution -serverInstance $server -databaseName "master" -query $verificationQuery
+
+    # Configure SQL Server settings
+    Set-SqlServerSettings -server $server -debugMode $debugMode
+
+    # Install SSMS if requested
+    Install-SSMSIfRequested -installSsms $installSsms -ssmsInstallerPath $ssmsInstallerPath -debugMode $debugMode
+
+    Show-ProgressMessage -message "Verifying if updates were applied..."
+    Test-UpdatesApplied -updateSourcePath $updateSourcePath
+
+    # Restart SQL Server services to apply settings
+    Restart-SqlServices -server $server -debugMode $debugMode
+
+    # Verify if SQL Server Agent is running
+    Start-SqlServerAgent -DebugMode $debugMode
+
+    # Show final informational message
+    Show-FinalMessage
+}
+
+# Execute the main function
+Invoke-InstallSqlServer
