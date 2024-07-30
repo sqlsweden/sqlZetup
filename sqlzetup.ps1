@@ -1,4 +1,3 @@
-# Main script
 <#
 .SYNOPSIS
     Automates the installation and configuration of SQL Server, including additional setup tasks and optional SSMS installation.
@@ -47,16 +46,13 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [int]$Version = 2022
 [string]$edition = "Developer"
 [string]$productKey = $null
-[string]$DataPath = "E:\MSSQL\Data"
-[string]$LogPath = "F:\MSSQL\Log"
-[string]$BackupPath = "H:\MSSQL\Backup"
-[string]$SqlCollation = "Finnish_Swedish_CI_AS"
-[int]$Port = 1433
-[string]$AdminAccount = "agdemo\sqlgroup"
 [string]$SqlDataDir = "E:\MSSQL\Data"
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
-[string]$SqlTempDbLogDir = "F:\MSSQL\Log"
+[string]$SqlCollation = "Finnish_Swedish_CI_AS"
+[int]$Port = 1433
+[string]$AdminAccount = "agdemo\sqlgroup"
+[string]$SqlTempDbLogDir = $SqlLogDir
 [string]$SqlTempDbDir = "G:\MSSQL\Data"
 [ValidateSet("Automatic", "Disabled", "Manual")]
 [string]$BrowserSvcStartupType = "Disabled"
@@ -68,7 +64,6 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [int]$TempdbDataFileSize = 512 # MB
 [ValidateRange(64, [int]::MaxValue)]
 [int]$TempdbLogFileSize = 64
-[int]$TempdbDataFileGrowth = 128
 [int]$TempdbLogFileGrowth = 64
 [bool]$installSsms = $false
 [bool]$debugMode = $false
@@ -659,9 +654,9 @@ function Invoke-SqlServerInstallation {
         Confirm                       = $false
         Feature                       = "Engine"
         InstancePath                  = "C:\Program Files\Microsoft SQL Server"
-        DataPath                      = $DataPath
-        LogPath                       = $LogPath
-        BackupPath                    = $BackupPath
+        DataPath                      = $SqlDataDir
+        LogPath                       = $SqlLogDir
+        BackupPath                    = $SqlBackupDir
         Path                          = "${driveLetter}:\"
         InstanceName                  = "MSSQLSERVER"
         AgentCredential               = $sqlAgentCredential
