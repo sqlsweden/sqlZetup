@@ -862,9 +862,9 @@ function Show-FinalMessage {
     # Add additional info for the end user when installation is complete
     Write-Host "Installation Complete! Here is some additional information:"
     Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log"
-    Write-Host "- Verification: Verify the installation by connecting to the SQL Server instance using SQL Server Management Studio (SSMS)"
-    Write-Host "  or using the command: `sqlcmd -S <YourServerName> -Q 'SELECT @@VERSION'"
-    Write-Host "- Post-Installation Steps: Ensure to review and implement security best practices, configure regular backups, and monitor your SQL Server instance."
+    Write-Host "- Setup monitoring Link:sdfsfsf"
+    Write-Host "  Bckup inclusion of partitions Link:jkkjdkfjnk"
+    Write-Host "- Antivirus exclusions Link:jkkjkjkj"
     Write-Host "- Resources: For further assistance, refer to the official documentation: https://docs.microsoft.com/en-us/sql/sql-server/"
 }
 
