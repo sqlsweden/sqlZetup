@@ -30,11 +30,73 @@
 
     This script is open-source and licensed under the MIT License.
 
-.AUTHOR
-    Michael Pettersson
+.PARAMETER sqlInstallerLocalPath
+    Path to the SQL Server ISO file.
 
-.VERSION
-    1.0
+.PARAMETER ssmsInstallerPath
+    Path to the SQL Server Management Studio installer.
+
+.PARAMETER Version
+    The version of SQL Server to install (e.g., 2016, 2017, 2019, 2022).
+
+.PARAMETER edition
+    The edition of SQL Server to install (e.g., Developer, Standard, Enterprise).
+
+.PARAMETER productKey
+    The product key for SQL Server installation. Required for Standard and Enterprise editions.
+
+.PARAMETER collation
+    The collation settings for SQL Server.
+
+.PARAMETER SqlSvcAccount
+    The service account for SQL Server.
+
+.PARAMETER AgtSvcAccount
+    The service account for SQL Server Agent.
+
+.PARAMETER AdminAccount
+    The administrator account for SQL Server.
+
+.PARAMETER SqlDataDir
+    The directory for SQL Server data files.
+
+.PARAMETER SqlLogDir
+    The directory for SQL Server log files.
+
+.PARAMETER SqlBackupDir
+    The directory for SQL Server backup files.
+
+.PARAMETER SqlTempDbDir
+    The directory for SQL Server TempDB files.
+
+.PARAMETER TempdbDataFileSize
+    The size of the TempDB data file in MB.
+
+.PARAMETER TempdbDataFileGrowth
+    The growth size of the TempDB data file in MB.
+
+.PARAMETER TempdbLogFileSize
+    The size of the TempDB log file in MB.
+
+.PARAMETER TempdbLogFileGrowth
+    The growth size of the TempDB log file in MB.
+
+.PARAMETER Port
+    The port for SQL Server.
+
+.PARAMETER installSsms
+    Indicates whether to install SQL Server Management Studio.
+
+.PARAMETER debugMode
+    Enables debug mode for detailed logging.
+
+.EXAMPLE
+
+
+.NOTES
+    Author: Michael Pettersson, Cegal
+    Version: 1.0
+    License: MIT License
 #>
 
 # Get the current script directory
@@ -43,45 +105,29 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 # User Configurable Parameters
 [string]$sqlInstallerLocalPath = "$scriptDir\SQLServer2022-x64-ENU-Dev.iso"
 [string]$ssmsInstallerPath = "$scriptDir\SSMS-Setup-ENU.exe"
+[ValidateSet(2016, 2017, 2019, 2022)]
 [int]$Version = 2022
+[ValidateSet("Developer", "Standard", "Enterprise")]
 [string]$edition = "Developer"
 [string]$productKey = $null
+[string]$collation = "Finnish_Swedish_CI_AS"
+[string]$SqlSvcAccount = "agdemo\sqlengine"
+[string]$AgtSvcAccount = "agdemo\sqlagent"
+[string]$AdminAccount = "agdemo\sqlgroup"
 [string]$SqlDataDir = "E:\MSSQL\Data"
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
-[string]$SqlCollation = "Finnish_Swedish_CI_AS"
-[int]$Port = 1433
-[string]$AdminAccount = "agdemo\sqlgroup"
-[string]$SqlTempDbLogDir = $SqlLogDir
 [string]$SqlTempDbDir = "G:\MSSQL\Data"
-[ValidateSet("Automatic", "Disabled", "Manual")]
-[string]$BrowserSvcStartupType = "Disabled"
-[ValidateSet(0, 1)]
-[int]$NpEnabled = 0
-[ValidateSet(0, 1)]
-[int]$TcpEnabled = 1
 [ValidateRange(512, [int]::MaxValue)]
 [int]$TempdbDataFileSize = 512 # MB
 [ValidateRange(64, [int]::MaxValue)]
-[int]$TempdbLogFileSize = 64
+[int]$TempdbDataFileGrowth = 64
+[ValidateRange(64, [int]::MaxValue)]
+[int]$TempdbLogFileSize = 512
 [int]$TempdbLogFileGrowth = 64
+[int]$Port = 1433
 [bool]$installSsms = $false
 [bool]$debugMode = $false
-[int]$SqlTempDbFileCount = 1
-
-$config = @{
-    SqlSvcAccount         = "agdemo\sqlengine"
-    AgtSvcAccount         = $null # Specifying $null = SqlSvcAccount # "agdemo\sqlagent"
-    SqlTempDbLogDir       = $SqlTempDbLogDir
-    SqlTempDbDir          = $SqlTempDbDir
-    SqlTempDbFileCount    = $SqlTempDbFileCount # Ensure SqlTempDbFileCount is included
-    BrowserSvcStartupType = $BrowserSvcStartupType
-    NpEnabled             = $NpEnabled
-    TcpEnabled            = $TcpEnabled
-    SqlSvcPassword        = $null
-    AgtSvcPassword        = $null
-    SaPwd                 = $null
-}
 
 # Static parameters
 [string]$server = $env:COMPUTERNAME
@@ -130,15 +176,8 @@ function Get-SecurePasswords {
     $global:saPassword = Read-Host -AsSecureString -Prompt "Enter the SA password"
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
     $global:sqlServiceAccountPassword = Read-Host -AsSecureString -Prompt "Enter the password for the SQL Server service account"
-
-    # Only prompt for Agent password if different from SqlSvcAccount
-    if ($config.SqlSvcAccount -ne $config.AgtSvcAccount) {
-        [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
-        $global:sqlAgentServiceAccountPassword = Read-Host -AsSecureString -Prompt "Enter the password for the SQL Server Agent service account"
-    }
-    else {
-        $global:sqlAgentServiceAccountPassword = $global:sqlServiceAccountPassword
-    }
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "Get-SecurePasswords")]
+    $global:sqlAgentServiceAccountPassword = Read-Host -AsSecureString -Prompt "Enter the password for the SQL Server Agent service account"
 }
 
 # Function to create PSCredential objects
@@ -146,9 +185,9 @@ function New-SqlCredentials {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
     $global:saCredential = New-Object System.Management.Automation.PSCredential -ArgumentList "sa", $saPassword
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
-    $global:sqlServiceCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $config.SqlSvcAccount, $sqlServiceAccountPassword
+    $global:sqlServiceCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $SqlSvcAccount, $sqlServiceAccountPassword
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseDeclaredVarsMoreThanAssignments", "", Scope = "Function", Target = "New-SqlCredentials")]
-    $global:sqlAgentCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $config.AgtSvcAccount, $sqlAgentServiceAccountPassword
+    $global:sqlAgentCredential = New-Object System.Management.Automation.PSCredential -ArgumentList $AgtSvcAccount, $sqlAgentServiceAccountPassword
 }
 
 # Function to mount ISO and get setup.exe path
@@ -472,11 +511,6 @@ function Read-Passwords {
         Write-Host "Error details: $_"
         Exit 1
     }
-
-    # Store passwords in the config object
-    $config.SqlSvcPassword = $sqlServiceCredential.GetNetworkCredential().Password
-    $config.AgtSvcPassword = $sqlAgentCredential.GetNetworkCredential().Password
-    $config.SaPwd = $saCredential.GetNetworkCredential().Password
 }
 
 # Function to test TempDb sizes
@@ -660,7 +694,6 @@ function Invoke-SqlServerInstallation {
         Path                          = "${driveLetter}:\"
         InstanceName                  = "MSSQLSERVER"
         AgentCredential               = $sqlAgentCredential
-        SqlCollation                  = $SqlCollation
         AdminAccount                  = $AdminAccount
         UpdateSourcePath              = $updateSourcePath
         PerformVolumeMaintenanceTasks = $true
@@ -668,7 +701,7 @@ function Invoke-SqlServerInstallation {
         EngineCredential              = $sqlServiceCredential
         Port                          = $Port
         SaCredential                  = $saCredential
-        Configuration                 = $config
+        SqlCollation                  = $collation
     }
 
     # Conditionally add the PID to the install parameters if it's needed
@@ -799,7 +832,7 @@ function Set-SqlServerSettings {
     Show-ProgressMessage -message "Configuring TempDB..."
     try {
         # Configure TempDB with the determined number of cores
-        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop
+        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -DataPath $SqlTempDbDir -LogPath $SqlLogDir -ErrorAction Stop
         if ($debugMode) { Write-Debug "Configured TempDB on server $server with $maxCores data files" }
     }
     catch {
@@ -859,15 +892,22 @@ function Show-FinalMessage {
 
     # Add an empty line for line break
     Write-Host ""
-    # Add additional info for the end user when installation is complete
+    # Add additional information for the end user when installation is complete
     Write-Host "Installation Complete! Here is some additional information:"
-    Write-Host "- Log Files: Check the installation logs located at C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log"
-    Write-Host "- Setup monitoring Link:sdfsfsf"
-    Write-Host "  Bckup inclusion of partitions Link:jkkjdkfjnk"
-    Write-Host "- Antivirus exclusions Link:jkkjkjkj"
-    Write-Host "- Resources: For further assistance, refer to the official documentation: https://docs.microsoft.com/en-us/sql/sql-server/"
+    Write-Host "--------------------------------------------------------------"
+    Write-Host "- Log Files: Check the installation log located at:"
+    Write-Host "  C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log\Summary.txt"
+    Write-Host "- Setup Monitoring: Visit the following URL for setup monitoring:"
+    Write-Host "  https://github.com/sqlsweden/sqlZetup/blob/main/Monitoring/zetupMonitoring.sql"
+    Write-Host "- Backup Inclusion: Verify the inclusion of partitions by visiting the following link:"
+    Write-Host "  Link: jkkjdkfjnk"
+    Write-Host "- Antivirus Exclusions: Ensure proper antivirus exclusions by visiting the following link:"
+    Write-Host "  Link: jkkjkjkj"
+    Write-Host "- Documentation: Remember to document your passwords."
+    Write-Host "- Resources: For further assistance, refer to the official documentation:"
+    Write-Host "  https://docs.microsoft.com/en-us/sql/sql-server/"
+    Write-Host "--------------------------------------------------------------"
 }
-
 
 # Main Function to install and configure SQL Server
 function Invoke-InstallSqlServer {
@@ -880,19 +920,13 @@ function Invoke-InstallSqlServer {
     $orderFile = $variables.orderFile
     $verificationQuery = $variables.verificationQuery
 
-    # Check if AgtSvcAccount is $null and set it to SqlSvcAccount if true
-    if ($null -eq $config.AgtSvcAccount) {
-        $config.AgtSvcAccount = $config.SqlSvcAccount
-    }
-
     # Test TempDB sizes
     Test-TempDbSizes -TempdbDataFileSize $TempdbDataFileSize -TempdbLogFileSize $TempdbLogFileSize
 
     # Show progress message for verifying volume block sizes
     Show-ProgressMessage -message "Verifying volume block sizes..."
     $volumePaths = @(
-        $config.SqlTempDbLogDir,
-        $config.SqlTempDbDir,
+        $SqlTempDbDir,
         $SqlDataDir,
         $SqlLogDir,
         $SqlBackupDir
