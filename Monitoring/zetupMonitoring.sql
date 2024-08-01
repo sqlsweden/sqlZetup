@@ -233,32 +233,33 @@ BEGIN
 END
 
 -- Configure alerts
-DECLARE @alert_names TABLE (name NVARCHAR(128), severity INT, message_id INT);
+DECLARE @alert_names TABLE (name NVARCHAR(128), severity INT, message_id INT, description NVARCHAR(MAX));
 
-INSERT INTO @alert_names (name, severity, message_id)
+INSERT INTO @alert_names (name, severity, message_id, description)
 VALUES
-    (N'URGENT: Severity 17 Error:', 17, 0),
-    (N'URGENT: Severity 18 Error: Nonfatal Internal Error', 18, 0),
-    (N'URGENT: Severity 19 Error: Fatal Error in Resource', 19, 0),
-    (N'URGENT: Severity 20 Error: Fatal Error in Current Process', 20, 0),
-    (N'URGENT: Severity 21 Error: Fatal Error in Database Process', 21, 0),
-    (N'URGENT: Severity 22 Error Fatal Error: Table Integrity Suspect', 22, 0),
-    (N'URGENT: Severity 23 Error: Fatal Error Database Integrity Suspect', 23, 0),
-    (N'URGENT: Severity 24 Error: Fatal Hardware Error', 24, 0),
-    (N'URGENT: Severity 25 Error: Fatal Error', 25, 0),
-    (N'URGENT: Error 823: I/O Error', 0, 823),
-    (N'URGENT: Error 824: Logical Consistency Error', 0, 824),
-    (N'URGENT: Error 825: Read Retry', 0, 825);
+    (N'URGENT: Severity 17 Error:', 17, 0, N'SQL Server has encountered a resource problem, such as memory or disk space issues. Check system resources and free up memory or disk space as needed. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 18 Error: Nonfatal Internal Error', 18, 0, N'An internal SQL Server error that is nonfatal but may affect performance. Analyze the error messages and review SQL Server logs to understand the cause. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 19 Error: Fatal Error in Resource', 19, 0, N'A severe error indicating that a particular resource is not available. Check the availability of system resources and troubleshoot any hardware issues. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 20 Error: Fatal Error in Current Process', 20, 0, N'A severe error indicating that the current process has crashed. Troubleshoot and review SQL Server logs to identify the cause. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 21 Error: Fatal Error in Database Process', 21, 0, N'A severe error in a database process, often requiring a database restore. Check the database status and restore from a backup if necessary. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 22 Error Fatal Error: Table Integrity Suspect', 22, 0, N'Indicates table integrity issues, which may suggest corruption. Use DBCC CHECKDB to check and resolve table integrity issues. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 23 Error: Fatal Error Database Integrity Suspect', 23, 0, N'Indicates database integrity is at risk, often due to corruption. Use DBCC CHECKDB to identify and repair corruption. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 24 Error: Fatal Hardware Error', 24, 0, N'A severe error indicating hardware issues, such as with the disk. Check hardware logs and contact the hardware vendor if needed. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Severity 25 Error: Fatal Error', 25, 0, N'A generic severe error requiring immediate attention. Analyze SQL Server logs to understand and resolve the problem. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors?view=sql-server-ver15'),
+    (N'URGENT: Error 823: I/O Error', 0, 823, N'Indicates that SQL Server has encountered issues reading from or writing to the disk. Check the underlying I/O system hardware and run DBCC CHECKDB to verify data integrity. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-823-database-engine-error?view=sql-server-ver15'),
+    (N'URGENT: Error 824: Logical Consistency Error', 0, 824, N'Indicates that SQL Server has encountered logical inconsistencies when reading data. Run DBCC CHECKDB to identify and repair logical inconsistencies. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-824-database-engine-error?view=sql-server-ver15'),
+    (N'URGENT: Error 825: Read Retry', 0, 825, N'Indicates that SQL Server experienced a transient error during a read operation but successfully retried. Monitor for further 825 errors and check the system hardware for potential issues. Further Information: https://docs.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-825-database-engine-error?view=sql-server-ver15');
 
 DECLARE @alert_name NVARCHAR(128),
         @severity INT,
-        @message_id INT;
+        @message_id INT,
+        @description NVARCHAR(MAX);
 
 DECLARE alert_cursor CURSOR FOR
-SELECT name, severity, message_id FROM @alert_names;
+SELECT name, severity, message_id, description FROM @alert_names;
 
 OPEN alert_cursor;
-FETCH NEXT FROM alert_cursor INTO @alert_name, @severity, @message_id;
+FETCH NEXT FROM alert_cursor INTO @alert_name, @severity, @message_id, @description;
 
 WHILE @@FETCH_STATUS = 0
 BEGIN
@@ -269,8 +270,9 @@ BEGIN
             @message_id = @message_id,
             @severity = @severity,
             @enabled = 1,
-            @delay_between_responses = 0,
-            @include_event_description_in = 1;
+            @delay_between_responses = 3600, -- Updated to 60 minutes
+            @include_event_description_in = 1,
+            @notification_message = @description;
     END
 
     -- Setup notifications
@@ -279,7 +281,7 @@ BEGIN
         @operator_name = @operator_name,
         @notification_method = 1;
 
-    FETCH NEXT FROM alert_cursor INTO @alert_name, @severity, @message_id;
+    FETCH NEXT FROM alert_cursor INTO @alert_name, @severity, @message_id, @description;
 END
 
 CLOSE alert_cursor;
