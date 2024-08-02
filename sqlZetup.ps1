@@ -958,12 +958,26 @@ function Invoke-InstallSqlServer {
     # Unmount ISO if it was used
     Dismount-IfIso -installerPath $sqlInstallerLocalPath
 
+    # Create a new database for script objects
+    Show-ProgressMessage -message "Creating new database for script objects..."
+    try {
+        New-DbaDatabase -SqlInstance $server -Name DBAdb -RecoveryModel Simple -Owner sa -PrimaryFilesize 256 -PrimaryFileGrowth 128 -LogSize 64 -LogGrowth 64
+        Write-Host "Database DBAdb created successfully." -ForegroundColor Green
+        if ($debugMode) { Write-Debug "Database DBAdb created successfully on server $server" }
+    }
+    catch {
+        Write-Host "Failed to create database DBAdb." -ForegroundColor Red
+        Write-Host "Error details: $_"
+        if ($debugMode) { Write-Debug "Failed to create database DBAdb on server $server. Error details: $_" }
+        Exit 1
+    }
+
     # Invoke SQL scripts from the order file
     Invoke-SqlScriptsFromOrderFile -orderFile $orderFile -scriptDirectory $scriptDirectory -server $server -debugMode $debugMode
 
     # Show progress message for verifying SQL script execution
     Show-ProgressMessage -message "Verifying SQL script execution..."
-    Test-SqlExecution -serverInstance $server -databaseName "master" -query $verificationQuery
+    Test-SqlExecution -serverInstance $server -databaseName "DBAdb" -query $verificationQuery
 
     # Configure SQL Server settings
     Set-SqlServerSettings -server $server -debugMode $debugMode
