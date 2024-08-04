@@ -114,17 +114,22 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [string]$SqlSvcAccount = "agdemo\sqlengine"
 [string]$AgtSvcAccount = "agdemo\sqlagent"
 [string]$AdminAccount = "agdemo\sqlgroup"
+
 [string]$SqlDataDir = "E:\MSSQL\Data"
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
+
 [string]$SqlTempDbDir = "G:\MSSQL\Data"
+[string]$SqlTempDbLog = "F:\MSSQL\Log"
+
 [ValidateRange(512, [int]::MaxValue)]
-[int]$TempdbDataFileSize = 512 # MB
-[ValidateRange(64, [int]::MaxValue)]
+[int]$TempdbDataFileSize = 512
 [int]$TempdbDataFileGrowth = 64
+
 [ValidateRange(64, [int]::MaxValue)]
-[int]$TempdbLogFileSize = 512
+[int]$TempdbLogFileSize = 64
 [int]$TempdbLogFileGrowth = 64
+
 [int]$Port = 1433
 [bool]$installSsms = $false
 [bool]$debugMode = $false
@@ -146,28 +151,31 @@ function Show-ProgressMessage {
     }
 }
 
-# Function to verify if the volume block size is 64 KB
-function Test-VolumeBlockSize {
+# Function to validate volume paths and block sizes
+function Test-Volume {
     param (
         [string[]]$paths
     )
     
     $drivesToCheck = $paths | ForEach-Object { $_[0] + ':' } | Sort-Object -Unique
 
-    $blockSizeOK = $true
     foreach ($drive in $drivesToCheck) {
+        if (-not (Test-Path -Path $drive)) {
+            Write-Host "Volume does not exist: $drive" -ForegroundColor Red
+            if ($debugMode) { Write-Debug "Volume does not exist: $drive" }
+            throw "Volume does not exist: $drive"
+        }
+
         $blockSize = Get-WmiObject -Query "SELECT BlockSize FROM Win32_Volume WHERE DriveLetter = '$drive'" | Select-Object -ExpandProperty BlockSize
         if ($blockSize -ne 65536) {
             Write-Host "Volume $drive does not use a 64 KB block size." -ForegroundColor Red
             if ($debugMode) { Write-Debug "BlockSize for volume $drive is $blockSize instead of 65536." }
-            $blockSizeOK = $false
+            throw "Volume $drive does not use a 64 KB block size."
         }
         else {
             Write-Host "Volume $drive uses a 64 KB block size." -ForegroundColor Green
         }
     }
-
-    return $blockSizeOK
 }
 
 # Function to prompt for secure passwords
@@ -514,21 +522,6 @@ function Read-Passwords {
     }
 }
 
-# Function to test TempDb sizes
-function Test-TempDbSizes {
-    param (
-        [int]$TempdbDataFileSize,
-        [int]$TempdbLogFileSize
-    )
-
-    if ($TempdbDataFileSize -lt 512) {
-        throw "TempdbDataFileSize must be at least 512 MB."
-    }
-    if ($TempdbLogFileSize -lt 64) {
-        throw "TempdbLogFileSize must be at least 64 MB."
-    }
-}
-
 # Function to set variables and verification query
 function Set-Variables {
     param (
@@ -692,6 +685,7 @@ function Invoke-SqlServerInstallation {
         DataPath                      = $SqlDataDir
         LogPath                       = $SqlLogDir
         BackupPath                    = $SqlBackupDir
+        #TempPath                      = $SqlTempDbDir
         Path                          = "${driveLetter}:\"
         InstanceName                  = "MSSQLSERVER"
         AgentCredential               = $sqlAgentCredential
@@ -751,21 +745,6 @@ function Invoke-SqlServerInstallation {
     Test-RebootRequirement -warnings $installWarning
 }
 
-# Function to validate directory paths
-function Validate-DirectoryPaths {
-    param (
-        [string[]]$paths
-    )
-
-    foreach ($path in $paths) {
-        if (-not (Test-Path -Path $path)) {
-            Write-Host "Directory does not exist: $path" -ForegroundColor Red
-            if ($debugMode) { Write-Debug "Directory does not exist: $path" }
-            throw "Directory does not exist: $path"
-        }
-    }
-}
-
 # Function to set SQL Server settings
 function Set-SqlServerSettings {
     param (
@@ -775,8 +754,8 @@ function Set-SqlServerSettings {
 
     Show-ProgressMessage -message "Starting additional configuration steps..."
 
-    # Validate directory paths
-    Validate-DirectoryPaths -paths @($SqlTempDbDir, $SqlLogDir)
+    # Validate volumes
+    Test-Volume -paths @($SqlTempDbDir, $SqlTempDbLog, $SqlLogDir, $SqlDataDir, $SqlBackupDir)
 
     # Log each configuration step with verbose and debug output
     Show-ProgressMessage -message "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections..."
@@ -840,7 +819,8 @@ function Set-SqlServerSettings {
         if ($debugMode) { Write-Debug "Failed to configure SQL Agent server settings on server $server. Error details: $_" }
         throw
     }
-
+     
+    <#    
     # Get the number of CPU cores
     $cpuCores = (Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 
@@ -851,7 +831,7 @@ function Set-SqlServerSettings {
     Show-ProgressMessage -message "Configuring TempDB..."
     try {
         # Configure TempDB with the determined number of cores
-        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -DataPath $SqlTempDbDir -LogPath $SqlLogDir -ErrorAction Stop
+        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop
         if ($debugMode) { Write-Debug "Configured TempDB on server $server with $maxCores data files" }
     }
     catch {
@@ -860,7 +840,7 @@ function Set-SqlServerSettings {
         if ($debugMode) { Write-Debug "Failed to configure TempDB on server $server. Error details: $_" }
         throw
     }
-
+#>
     Show-ProgressMessage -message "Additional configuration steps completed."
 }
 
@@ -890,6 +870,7 @@ function Install-SSMSIfRequested {
 }
 
 # Function to show final informational message
+# Function to show final informational message
 function Show-FinalMessage {
     Write-Host "SQL Server installation and configuration completed successfully." -ForegroundColor Green
     if ($debugMode) { 
@@ -918,19 +899,82 @@ function Show-FinalMessage {
     Write-Host "  C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log\Summary.txt"
     Write-Host "- Setup Monitoring: Visit the following URL for setup monitoring:"
     Write-Host "  https://github.com/sqlsweden/sqlZetup/blob/main/Monitoring/zetupMonitoring.sql"
-    Write-Host "- Backup Inclusion: Verify the inclusion of partitions by visiting the following link:"
-    Write-Host "  Link: jkkjdkfjnk"
+    Write-Host "- Include backup volume in backup schema: Verify the inclusion of partitions by visiting the following link:"
+    Write-Host "  https://github.com/sqlsweden/sqlZetup/wiki/backupschema"
     Write-Host "- Antivirus Exclusions: Ensure proper antivirus exclusions by visiting the following link:"
-    Write-Host "  Link: jkkjkjkj"
+    Write-Host "  Link:"
     Write-Host "- Documentation: Remember to document your passwords."
-    Write-Host "- Resources: For further assistance, refer to the official documentation:"
-    Write-Host "  https://docs.microsoft.com/en-us/sql/sql-server/"
     Write-Host "--------------------------------------------------------------"
+    Write-Host "- How should I schedule jobs? The answer depends on your maintenance window, the size of your databases, the maximum data loss you can tolerate, and many other factors. The current setup looks like this."
+    Write-Host ""
+
+    # Create table header
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host "  | Job Type                                                | Frequency       | Time    |"
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+
+    # Add user databases information
+    Write-Host "  | User databases                                          |                 |         |"
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host "  | DBA - Database Backup - USER_DATABASES - FULL           | Sunday          | 21:15   |"
+    Write-Host "  | DBA - Database Backup - USER_DATABASES - DIFF           | daily (ex. Sun) | 21:15   |"
+    Write-Host "  | DBA - Database Backup - USER_DATABASES - LOG            | Daily           | 15m int |"
+    Write-Host "  | DBA - Database Integrity Check - USER_DATABASES         | Saturday        | 23:45   |"
+    Write-Host "  | DBA - Index Optimize - USER_DATABASES                   | Friday          | 18:00   |"
+    Write-Host "  | DBA - Statistics Update - USER_DATABASES                | Daily           | 03:00   |"
+
+    # Add system databases information
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host "  | System databases                                        |                 |         |"
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host "  | DBA - Database Backup - SYSTEM_DATABASES - FULL         |  Daily          | 21:05   |"
+    Write-Host "  | DBA - Database Integrity Check - SYSTEM_DATABASES       |  Sunday         | 20:45   |"
+    Write-Host "  | DBA - Index And Statistics Optimize - SYSTEM_DATABASES  |  Sunday         | 20:15   |"
+
+    # Add cleanup information
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host "  | Cleanup                                                 |                 |         |"
+    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host "  | DBA - Delete Backup History                             | Sunday          | 02:05   |"
+    Write-Host "  | DBA - Purge Job History                                 | Sunday          | 02:05   |"
+    Write-Host "  | DBA - Command Log Cleanup                               | Sunday          | 02:05   |"
+    Write-Host "  | DBA - Output File Cleanup                               | Sunday          | 02:05   |"
+    Write-Host "  | DBA - Purge Mail Items                                  | Sunday          | 02:05   |"
+    Write-Host "-----------------------------------------------------------------------------------------"
+}
+
+# Function to validate collation
+function Test-Collation {
+    param (
+        [string]$collation,
+        [string]$scriptDir
+    )
+
+    # Path to the collation.txt file
+    $collationFilePath = Join-Path -Path $scriptDir -ChildPath "collation.txt"
+
+    # Check if the collation file exists
+    if (-Not (Test-Path -Path $collationFilePath)) {
+        Write-Host "Collation file not found at path: $collationFilePath" -ForegroundColor Red
+        throw "Collation file not found"
+    }
+
+    # Read valid collations from the file
+    $validCollations = Get-Content -Path $collationFilePath
+
+    # Validate the specified collation
+    if ($collation -notin $validCollations) {
+        Write-Host "Invalid collation: $collation. Please specify a valid collation." -ForegroundColor Red
+        throw "Invalid collation specified"
+    }
 }
 
 # Main Function to install and configure SQL Server
 function Invoke-InstallSqlServer {
     try {
+        # Validate the collation before proceeding
+        Test-Collation -collation $collation -scriptDir $scriptDir
+
         # Initialize the dbatools module
         Initialize-DbatoolsModule
 
@@ -940,80 +984,40 @@ function Invoke-InstallSqlServer {
         $orderFile = $variables.orderFile
         $verificationQuery = $variables.verificationQuery
 
-        # Test TempDB sizes
-        Test-TempDbSizes -TempdbDataFileSize $TempdbDataFileSize -TempdbLogFileSize $TempdbLogFileSize
+        # Validate volumes and block sizes
+        Show-ProgressMessage -message "Verifying volume paths and block sizes..."
+        Test-Volume -paths @($SqlTempDbDir, $SqlTempDbLog, $SqlLogDir, $SqlDataDir, $SqlBackupDir)
 
-        # Show progress message for verifying volume block sizes
-        Show-ProgressMessage -message "Verifying volume block sizes..."
-        $volumePaths = @(
-            $SqlTempDbDir,
-            $SqlDataDir,
-            $SqlLogDir,
-            $SqlBackupDir
-        )
-
-        # Test volume block sizes and handle user decision if sizes are not correct
-        if (-not (Test-VolumeBlockSize -paths $volumePaths)) {
-            $userInput = Read-Host "One or more volumes do not use a 64 KB block size. Do you want to continue with the installation? (Y/N)"
-            if ($userInput -ne 'Y') {
-                Write-Host "Installation cancelled by user." -ForegroundColor Red
-                if ($debugMode) { Write-Debug "User cancelled installation due to volume block size check failure." }
-                throw "User cancelled installation"
-            }
-        }
-
-        # Read passwords and store them securely
+        # Read passwords
         Read-Passwords
 
-        # Determine installer path, SQL version, and update directory
-        $installerDetails = Get-SqlInstallerDetails -installerPath $sqlInstallerLocalPath -scriptDir $scriptDir
-
-        $installerPath = $installerDetails.SetupPath
-        $driveLetter = $installerDetails.DriveLetter
-        $updateSourcePath = $installerDetails.UpdateSourcePath
+        # Get SQL Installer details
+        Show-ProgressMessage -message "Starting SQL Server installation..."
+        $sqlInstallerDetails = Get-SqlInstallerDetails -installerPath $sqlInstallerLocalPath -scriptDir $scriptDir
+        $setupPath = $sqlInstallerDetails.SetupPath
+        $driveLetter = $sqlInstallerDetails.DriveLetter
+        $updateSourcePath = $sqlInstallerDetails.UpdateSourcePath
 
         # Invoke SQL Server installation
-        Invoke-SqlServerInstallation -installerPath $installerPath -updateSourcePath $updateSourcePath -driveLetter $driveLetter -server $server -debugMode $debugMode
+        Invoke-SqlServerInstallation -installerPath $setupPath -updateSourcePath $updateSourcePath -driveLetter $driveLetter -server $server -debugMode $debugMode
 
         # Unmount ISO if it was used
         Dismount-IfIso -installerPath $sqlInstallerLocalPath
 
-        # Create a new database for script objects
-        Show-ProgressMessage -message "Creating new database for script objects..."
-        try {
-            New-DbaDatabase -SqlInstance $server -Name DBAdb -RecoveryModel Simple -Owner sa -PrimaryFilesize 256 -PrimaryFileGrowth 128 -LogSize 64 -LogGrowth 64
-            Write-Host "Database DBAdb created successfully." -ForegroundColor Green
-            if ($debugMode) { Write-Debug "Database DBAdb created successfully on server $server" }
-        }
-        catch {
-            Write-Host "Failed to create database DBAdb." -ForegroundColor Red
-            Write-Host "Error details: $_"
-            if ($debugMode) { Write-Debug "Failed to create database DBAdb on server $server. Error details: $_" }
-            throw
-        }
+        # Set SQL Server settings
+        Set-SqlServerSettings -server $server -debugMode $debugMode
 
         # Invoke SQL scripts from the order file
         Invoke-SqlScriptsFromOrderFile -orderFile $orderFile -scriptDirectory $scriptDirectory -server $server -debugMode $debugMode
 
-        # Show progress message for verifying SQL script execution
-        Show-ProgressMessage -message "Verifying SQL script execution..."
+        # Test SQL Execution
         Test-SqlExecution -serverInstance $server -databaseName "DBAdb" -query $verificationQuery
 
-        # Set SQL Server settings
-        Set-SqlServerSettings -server $server -debugMode $debugMode
-
-        # Install SQL Server Management Studio if requested
-        Install-SSMSIfRequested -installSsms $installSsms -ssmsInstallerPath $ssmsInstallerPath -debugMode $debugMode
-
-        # Verify if updates were applied
-        Show-ProgressMessage -message "Verifying if updates were applied..."
-        Test-UpdatesApplied -updateSourcePath $updateSourcePath
-
-        # Restart SQL Server services to apply settings
+        # Restart SQL Services
         Restart-SqlServices -server $server -debugMode $debugMode
 
-        # Ensure SQL Server Agent is running
-        Start-SqlServerAgent -DebugMode $debugMode
+        # Install SSMS if requested
+        Install-SSMSIfRequested -installSsms $installSsms -ssmsInstallerPath $ssmsInstallerPath -debugMode $debugMode
 
         # Show final informational message
         Show-FinalMessage
@@ -1023,7 +1027,10 @@ function Invoke-InstallSqlServer {
         Write-Host "Error Details: $_"
         throw
     }
+    finally {
+        Write-Host "Script execution completed."
+    }
 }
 
-# Start the SQL Server installation process
+# Start the installation process
 Invoke-InstallSqlServer

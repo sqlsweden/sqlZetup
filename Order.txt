@@ -1,9 +1,10 @@
+master:000-CreateDBAdb.sql
 DBAdb:001-MaintenanceSolution.sql
-Msdb:002-MaintenanceSolutionAgentJobs.sql
+msdb:002-MaintenanceSolutionAgentJobs.sql
 DBAdb:003-MaintenanceCommandLog.sql
-Msdb:004-msdb_missing_indexes.sql
-Master:005-master-initial-size.sql
-Master:006-msdb-initial-size.sql
-Master:007-model-initial-size.sql
+msdb:004-msdb_missing_indexes.sql
+master:005-master-initial-size.sql
+master:006-msdb-initial-size.sql
+master:007-model-initial-size.sql
 DBAdb:008-CheckCommandLogErrors.sql
 DBAdb:009-OlaHallengrenVersionCheck.sql
