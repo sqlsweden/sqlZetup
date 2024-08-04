@@ -114,22 +114,17 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [string]$SqlSvcAccount = "agdemo\sqlengine"
 [string]$AgtSvcAccount = "agdemo\sqlagent"
 [string]$AdminAccount = "agdemo\sqlgroup"
-
 [string]$SqlDataDir = "E:\MSSQL\Data"
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
-
 [string]$SqlTempDbDir = "G:\MSSQL\Data"
-[string]$SqlTempDbLog = "F:\MSSQL\Log"
-
+[string]$SqlTempDbLog = $SqlLogDir #"F:\MSSQL\Log"
 [ValidateRange(512, [int]::MaxValue)]
 [int]$TempdbDataFileSize = 512
 [int]$TempdbDataFileGrowth = 64
-
 [ValidateRange(64, [int]::MaxValue)]
 [int]$TempdbLogFileSize = 64
 [int]$TempdbLogFileGrowth = 64
-
 [int]$Port = 1433
 [bool]$installSsms = $false
 [bool]$debugMode = $false
@@ -673,6 +668,14 @@ function Invoke-SqlServerInstallation {
         [string]$server,
         [bool]$debugMode
     )
+    
+    # SQL Server Installation Parameters not covered by parameters in Install-DbaInstance
+    $installParamsExtended = @{
+        SqlTempdbFileCount    = 1
+        SqlTempdbDir          = $SqlTempDbDir
+        SqlTempdbLogDir       = $SqlTempDbLog
+        BrowserSvcStartupType = "Disabled"
+    }
 
     # SQL Server Installation Parameters
     $installParams = @{
@@ -685,7 +688,6 @@ function Invoke-SqlServerInstallation {
         DataPath                      = $SqlDataDir
         LogPath                       = $SqlLogDir
         BackupPath                    = $SqlBackupDir
-        #TempPath                      = $SqlTempDbDir
         Path                          = "${driveLetter}:\"
         InstanceName                  = "MSSQLSERVER"
         AgentCredential               = $sqlAgentCredential
@@ -697,6 +699,7 @@ function Invoke-SqlServerInstallation {
         Port                          = $Port
         SaCredential                  = $saCredential
         SqlCollation                  = $collation
+        Configuration                 = $installParamsExtended
     }
 
     # Conditionally add the PID to the install parameters if it's needed
@@ -819,8 +822,7 @@ function Set-SqlServerSettings {
         if ($debugMode) { Write-Debug "Failed to configure SQL Agent server settings on server $server. Error details: $_" }
         throw
     }
-     
-    <#    
+      
     # Get the number of CPU cores
     $cpuCores = (Get-WmiObject -Class Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 
@@ -840,7 +842,7 @@ function Set-SqlServerSettings {
         if ($debugMode) { Write-Debug "Failed to configure TempDB on server $server. Error details: $_" }
         throw
     }
-#>
+
     Show-ProgressMessage -message "Additional configuration steps completed."
 }
 
@@ -894,53 +896,51 @@ function Show-FinalMessage {
     Write-Host ""
     # Add additional information for the end user when installation is complete
     Write-Host "Installation Complete! Here is some additional information:"
-    Write-Host "--------------------------------------------------------------"
+    Write-Host "----------------------------------------------------------------------------------------"
     Write-Host "- Log Files: Check the installation log located at:"
     Write-Host "  C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log\Summary.txt"
-    Write-Host "- Setup Monitoring: Visit the following URL for setup monitoring:"
+    Write-Host "- Setup Monitoring: Visit the following URL to find a script for manual setup."
     Write-Host "  https://github.com/sqlsweden/sqlZetup/blob/main/Monitoring/zetupMonitoring.sql"
-    Write-Host "- Include backup volume in backup schema: Verify the inclusion of partitions by visiting the following link:"
-    Write-Host "  https://github.com/sqlsweden/sqlZetup/wiki/backupschema"
-    Write-Host "- Antivirus Exclusions: Ensure proper antivirus exclusions by visiting the following link:"
-    Write-Host "  Link:"
-    Write-Host "- Documentation: Remember to document your passwords."
-    Write-Host "--------------------------------------------------------------"
-    Write-Host "- How should I schedule jobs? The answer depends on your maintenance window, the size of your databases, the maximum data loss you can tolerate, and many other factors. The current setup looks like this."
+    Write-Host "- Include the backup volume in the backup for the file level backup."
+    Write-Host "- Exclude the database files and folders from the antivirus software if it's used."
+    Write-Host "- Document the passwords used in this installation at the proper location."
     Write-Host ""
-
+    Write-Host "- The current sql server agent jobs are scheduled like this. It might be necessary to adjust."
+   
     # Create table header
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
-    Write-Host "  | Job Type                                                | Frequency       | Time    |"
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " | Job Type                                                | Frequency       | Time    |"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
 
     # Add user databases information
-    Write-Host "  | User databases                                          |                 |         |"
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
-    Write-Host "  | DBA - Database Backup - USER_DATABASES - FULL           | Sunday          | 21:15   |"
-    Write-Host "  | DBA - Database Backup - USER_DATABASES - DIFF           | daily (ex. Sun) | 21:15   |"
-    Write-Host "  | DBA - Database Backup - USER_DATABASES - LOG            | Daily           | 15m int |"
-    Write-Host "  | DBA - Database Integrity Check - USER_DATABASES         | Saturday        | 23:45   |"
-    Write-Host "  | DBA - Index Optimize - USER_DATABASES                   | Friday          | 18:00   |"
-    Write-Host "  | DBA - Statistics Update - USER_DATABASES                | Daily           | 03:00   |"
+    Write-Host " | User databases                                          |                 |         |"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " | DBA - Database Backup - USER_DATABASES - FULL           | Sunday          | 21:15   |"
+    Write-Host " | DBA - Database Backup - USER_DATABASES - DIFF           | daily (ex. Sun) | 21:15   |"
+    Write-Host " | DBA - Database Backup - USER_DATABASES - LOG            | Daily           | 15m int |"
+    Write-Host " | DBA - Database Integrity Check - USER_DATABASES         | Saturday        | 23:45   |"
+    Write-Host " | DBA - Index Optimize - USER_DATABASES                   | Friday          | 18:00   |"
+    Write-Host " | DBA - Statistics Update - USER_DATABASES                | Daily           | 03:00   |"
 
     # Add system databases information
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
-    Write-Host "  | System databases                                        |                 |         |"
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
-    Write-Host "  | DBA - Database Backup - SYSTEM_DATABASES - FULL         |  Daily          | 21:05   |"
-    Write-Host "  | DBA - Database Integrity Check - SYSTEM_DATABASES       |  Sunday         | 20:45   |"
-    Write-Host "  | DBA - Index And Statistics Optimize - SYSTEM_DATABASES  |  Sunday         | 20:15   |"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " | System databases                                        |                 |         |"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " | DBA - Database Backup - SYSTEM_DATABASES - FULL         | Daily           | 21:05   |"
+    Write-Host " | DBA - Database Integrity Check - SYSTEM_DATABASES       | Sunday          | 20:45   |"
+    Write-Host " | DBA - Index And Statistics Optimize - SYSTEM_DATABASES  | Sunday          | 20:15   |"
 
     # Add cleanup information
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
-    Write-Host "  | Cleanup                                                 |                 |         |"
-    Write-Host "  |---------------------------------------------------------|-----------------|---------|"
-    Write-Host "  | DBA - Delete Backup History                             | Sunday          | 02:05   |"
-    Write-Host "  | DBA - Purge Job History                                 | Sunday          | 02:05   |"
-    Write-Host "  | DBA - Command Log Cleanup                               | Sunday          | 02:05   |"
-    Write-Host "  | DBA - Output File Cleanup                               | Sunday          | 02:05   |"
-    Write-Host "  | DBA - Purge Mail Items                                  | Sunday          | 02:05   |"
-    Write-Host "-----------------------------------------------------------------------------------------"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " | Cleanup                                                 |                 |         |"
+    Write-Host " |---------------------------------------------------------|-----------------|---------|"
+    Write-Host " | DBA - Delete Backup History                             | Sunday          | 02:05   |"
+    Write-Host " | DBA - Purge Job History                                 | Sunday          | 02:05   |"
+    Write-Host " | DBA - Command Log Cleanup                               | Sunday          | 02:05   |"
+    Write-Host " | DBA - Output File Cleanup                               | Sunday          | 02:05   |"
+    Write-Host " | DBA - Purge Mail Items                                  | Sunday          | 02:05   |"
+    Write-Host " ---------------------------------------------------------------------------------------"
+    Write-Host ""
 }
 
 # Function to validate collation
@@ -992,7 +992,8 @@ function Invoke-InstallSqlServer {
         Read-Passwords
 
         # Get SQL Installer details
-        Show-ProgressMessage -message "Starting SQL Server installation..."
+        # Remove the duplicate progress message
+        # Show-ProgressMessage -message "Starting SQL Server installation..."
         $sqlInstallerDetails = Get-SqlInstallerDetails -installerPath $sqlInstallerLocalPath -scriptDir $scriptDir
         $setupPath = $sqlInstallerDetails.SetupPath
         $driveLetter = $sqlInstallerDetails.DriveLetter
