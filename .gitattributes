@@ -1,2 +1,23 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Specify file types and their end-of-line handling
+*.ps1    text eol=lf
+*.psm1   text eol=lf
+*.sql    text eol=lf
+
+# Specify file types and their diff and merge strategies
+*.ps1    diff
+*.psm1   diff
+*.sql    diff
+
+# Specify how binary files should be handled
+*.dll    binary
+*.exe    binary
+
+# Specify file types to ignore Git's automatic conversion
+*.psd1   -text
+*.psm1   -text
+*.sql    -text
+
+# Specify other file types if needed
+*.config text eol=lf
+*.xml    text eol=lf
+
