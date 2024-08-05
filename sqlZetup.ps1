@@ -126,7 +126,7 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [int]$TempdbLogFileSize = 64
 [int]$TempdbLogFileGrowth = 64
 [int]$Port = 1433
-[bool]$installSsms = $false
+[bool]$installSsms = $true
 [bool]$debugMode = $false
 
 # Static parameters
@@ -238,7 +238,7 @@ function Dismount-Iso {
 
     try {
         $diskImage = Get-DiskImage -ImagePath $isoPath
-        Dismount-DiskImage -ImagePath $diskImage.ImagePath
+        Dismount-DiskImage -ImagePath $diskImage.ImagePath | Out-Null
         Log-Message -message "Unmounted ISO at $($diskImage.DevicePath)" -type "Info"
     }
     catch {
@@ -364,7 +364,7 @@ function Install-Ssms {
     $params = "/Install /Quiet"
 
     try {
-        Start-Process -FilePath $installerPath -ArgumentList $params -Wait
+        Start-Process -FilePath $installerPath -ArgumentList $params -Wait | Out-Null
         Log-Message -message "SSMS installation completed." -type "Info"
     }
     catch {
@@ -401,16 +401,14 @@ function Test-SqlExecution {
 
     try {
         Log-Message -message "Executing query on server: $serverInstance, database: $databaseName" -type "Info"
-        Log-Message -message "Query: $query" -type "Info"
 
+        # Capture the result of the query
         $result = Invoke-DbaQuery -SqlInstance $serverInstance -Database $databaseName -Query $query -ErrorAction Stop
 
         if ($null -eq $result -or $result.Count -eq 0) {
             Log-Message -message "No data returned from the query or query returned a null result." -type "Error"
             throw "Query returned null or no data"
         }
-
-        Log-Message -message "Query result: $($result | Format-Table -AutoSize | Out-String)" -type "Info"
 
         $tableExistsMessage = $result | Select-Object -ExpandProperty Column1
         Log-Message -message "Extracted Message: '$tableExistsMessage'" -type "Info"
@@ -444,7 +442,7 @@ function Start-SqlServerAgent {
     if ($agentServiceStatus -and $agentServiceStatus.Status -ne 'Running') {
         Log-Message -message "SQL Server Agent is not running. Attempting to start it..." -type "Warning"
         try {
-            Start-Service -Name "SQLSERVERAGENT"
+            Start-Service -Name "SQLSERVERAGENT" | Out-Null
             Log-Message -message "SQL Server Agent started successfully." -type "Info"
         }
         catch {
@@ -467,7 +465,7 @@ function Initialize-DbatoolsModule {
     else {
         Log-Message -message "Loading module: dbatools..." -type "Info"
         try {
-            Import-Module dbatools -ErrorAction Stop
+            Import-Module dbatools -ErrorAction Stop | Out-Null
             Log-Message -message "Module dbatools loaded successfully." -type "Info"
         }
         catch {
@@ -528,7 +526,7 @@ function Restart-SqlServices {
 
     Show-ProgressMessage -activity "Finalizing" -status "Restarting SQL Server services" -percentComplete 0
     try {
-        Restart-DbaService -SqlInstance $server -Type Engine, Agent -Confirm:$false
+        Restart-DbaService -SqlInstance $server -Type Engine, Agent -Confirm:$false | Out-Null
         Log-Message -message "SQL Server services restarted successfully." -type "Info"
         Show-ProgressMessage -activity "Finalizing" -status "SQL Server services restarted" -percentComplete 100
     }
@@ -604,7 +602,7 @@ function Invoke-SqlScriptsFromOrderFile {
             $scriptContent = Get-Content -Path $filePath -Raw
 
             try {
-                Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent
+                Invoke-DbaQuery -SqlInstance $server -Database $databaseName -Query $scriptContent | Out-Null
                 Log-Message -message "Successfully executed script: $fileName on database: $databaseName" -type "Info"
             }
             catch {
@@ -679,7 +677,7 @@ function Invoke-SqlServerInstallation {
     try {
         Invoke-Command {
             Install-DbaInstance @installParams
-        } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false
+        } -OutVariable installOutput -ErrorVariable installError -WarningVariable installWarning -Verbose:$false | Out-Null
         Show-ProgressMessage -activity "Installation" -status "SQL Server installation completed" -percentComplete 100
     }
     catch {
@@ -710,45 +708,45 @@ function Set-SqlServerSettings {
     Show-ProgressMessage -activity "Configuration" -status "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections" -percentComplete 20
     Get-DbaSpConfigure -SqlInstance $server -Name 'backup compression default', 'optimize for ad hoc workloads', 'remote admin connections' |
     ForEach-Object {
-        Set-DbaSpConfigure -SqlInstance $server -Name $_.Name -Value 1
+        Set-DbaSpConfigure -SqlInstance $server -Name $_.Name -Value 1 | Out-Null
     }
 
     Show-ProgressMessage -activity "Configuration" -status "Setting cost threshold for parallelism" -percentComplete 30
-    Set-DbaSpConfigure -SqlInstance $server -Name 'cost threshold for parallelism' -Value 75
+    Set-DbaSpConfigure -SqlInstance $server -Name 'cost threshold for parallelism' -Value 75 | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Setting recovery interval (min)" -percentComplete 40
-    Set-DbaSpConfigure -SqlInstance $server -Name 'recovery interval (min)' -Value 60
+    Set-DbaSpConfigure -SqlInstance $server -Name 'recovery interval (min)' -Value 60 | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring startup parameter for TraceFlag 3226" -percentComplete 50
-    Set-DbaStartupParameter -SqlInstance $server -TraceFlag 3226 -Confirm:$false
+    Set-DbaStartupParameter -SqlInstance $server -TraceFlag 3226 -Confirm:$false | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Setting max memory" -percentComplete 60
-    Set-DbaMaxMemory -SqlInstance $server
+    Set-DbaMaxMemory -SqlInstance $server | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Setting max degree of parallelism" -percentComplete 70
-    Set-DbaMaxDop -SqlInstance $server
+    Set-DbaMaxDop -SqlInstance $server | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring power plan" -percentComplete 80
-    Set-DbaPowerPlan -ComputerName $server
+    Set-DbaPowerPlan -ComputerName $server | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring error log settings" -percentComplete 90
-    Set-DbaErrorLogConfig -SqlInstance $server -LogCount 60 -LogSize 500
+    Set-DbaErrorLogConfig -SqlInstance $server -LogCount 60 -LogSize 500 | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring database file growth settings for 'master' database" -percentComplete 91
-    Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Data -GrowthType MB -Growth 128
-    Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Log -GrowthType MB -Growth 64
+    Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Data -GrowthType MB -Growth 128 | Out-Null
+    Set-DbaDbFileGrowth -SqlInstance $server -Database master -FileType Log -GrowthType MB -Growth 64 | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring database file growth settings for 'msdb' database" -percentComplete 92
-    Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Data -GrowthType MB -Growth 128
-    Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Log -GrowthType MB -Growth 64
+    Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Data -GrowthType MB -Growth 128 | Out-Null
+    Set-DbaDbFileGrowth -SqlInstance $server -Database msdb -FileType Log -GrowthType MB -Growth 64 | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring database file growth settings for 'model' database" -percentComplete 93
-    Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Data -GrowthType MB -Growth 128
-    Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Log -GrowthType MB -Growth 64
+    Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Data -GrowthType MB -Growth 128 | Out-Null
+    Set-DbaDbFileGrowth -SqlInstance $server -Database model -FileType Log -GrowthType MB -Growth 64 | Out-Null
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring SQL Agent server settings" -percentComplete 94
     try {
-        Set-DbaAgentServer -SqlInstance $server -MaximumJobHistoryRows 0 -MaximumHistoryRows -1 -ReplaceAlertTokens Enabled
+        Set-DbaAgentServer -SqlInstance $server -MaximumJobHistoryRows 0 -MaximumHistoryRows -1 -ReplaceAlertTokens Enabled | Out-Null
     }
     catch {
         Log-Message -message "Warning: Failed to configure SQL Agent server settings. Ensure 'Agent XPs' is enabled. Error details: $_" -type "Warning"
@@ -759,7 +757,7 @@ function Set-SqlServerSettings {
 
     Show-ProgressMessage -activity "Configuration" -status "Configuring TempDB" -percentComplete 95
     try {
-        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop
+        Set-DbaTempDbConfig -SqlInstance $server -DataFileCount $maxCores -DataFileSize $TempdbDataFileSize -LogFileSize $TempdbLogFileSize -DataFileGrowth $TempdbDataFileGrowth -LogFileGrowth $TempdbLogFileGrowth -ErrorAction Stop | Out-Null
     }
     catch {
         Log-Message -message "Warning: Failed to configure TempDB. Error details: $_" -type "Warning"
