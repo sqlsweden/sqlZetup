@@ -1,0 +1,39 @@
+Running SQL Server and antivirus software on the same machine requires careful configuration to ensure optimal performance and security. Here are the recommendations regarding antivirus exclusions for SQL Server:
+
+1. File Extensions to Exclude:
+
+* .mdf - Primary database file
+* .ndf - Secondary database file
+* .ldf - Log file
+
+2. Directories to Exclude:
+
+* Database files location: The directory where your database files (.mdf, .ndf, .ldf) are stored.
+* Backup files location: The directory where your SQL Server backup files are stored.
+* SQL Server program files: Typically located in directories like C:\Program Files\Microsoft SQL Server.
+* Temporary data files: The directory for SQL Server's temporary files (often C:\Program Files\Microsoft SQL Server\MSSQL.xx\MSSQL\DATA\ or similar).
+
+3. Processes to Exclude:
+
+* sqlservr.exe - The SQL Server service executable.
+* sqlagent.exe - The SQL Server Agent service executable.
+
+4. Network Exclusions:
+
+* Ensure antivirus software does not interfere with SQL Server network traffic. Exclude SQL Server network ports (default is 1433 for TCP/IP) from real-time scanning.
+
+5. Backup and Restore Operations:
+
+* Ensure antivirus software is not scanning or blocking backup or restore operations, as these can be intensive and time-sensitive.
+
+6. Transaction Logs:
+
+* Exclude transaction log directories, as scanning these can severely impact performance.
+
+7. Temporary Directories:
+
+* Any temporary directories used by SQL Server (like those used by Integration Services or Analysis Services).
+
+8. Database Management Files:
+
+* Any directories used by SQL Server for replication or other database management operations.

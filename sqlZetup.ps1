@@ -118,7 +118,7 @@ $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 [string]$SqlLogDir = "F:\MSSQL\Log"
 [string]$SqlBackupDir = "H:\MSSQL\Backup"
 [string]$SqlTempDbDir = "G:\MSSQL\Data"
-[string]$SqlTempDbLog = $SqlLogDir #"F:\MSSQL\Log"
+[string]$SqlTempDbLog = $SqlLogDir
 [ValidateRange(512, [int]::MaxValue)]
 [int]$TempdbDataFileSize = 512
 [int]$TempdbDataFileGrowth = 64
@@ -703,8 +703,6 @@ function Set-SqlServerSettings {
 
     Show-ProgressMessage -activity "Configuration" -status "Starting additional configuration steps" -percentComplete 0
 
-    Test-Volume -paths @($SqlTempDbDir, $SqlTempDbLog, $SqlLogDir, $SqlDataDir, $SqlBackupDir)
-
     Show-ProgressMessage -activity "Configuration" -status "Configuring backup compression, optimize for ad hoc workloads, and remote admin connections" -percentComplete 20
     Get-DbaSpConfigure -SqlInstance $server -Name 'backup compression default', 'optimize for ad hoc workloads', 'remote admin connections' |
     ForEach-Object {
@@ -818,37 +816,6 @@ function Show-FinalMessage {
     Log-Message -message "- Exclude the database files and folders from the antivirus software if it's used." -type "Info"
     Log-Message -message "- Document the passwords used in this installation at the proper location." -type "Info"
     Log-Message -message "" -type "Info"
-    Log-Message -message "- The current sql server agent jobs are scheduled like this. It might be necessary to adjust." -type "Info"
-   
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | Job Type                                                | Frequency       | Time    |" -type "Info"
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | User databases                                          |                 |         |" -type "Info"
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | DBA - Database Backup - USER_DATABASES - FULL           | Sunday          | 21:15   |" -type "Info"
-    Log-Message -message " | DBA - Database Backup - USER_DATABASES - DIFF           | daily (ex. Sun) | 21:15   |" -type "Info"
-    Log-Message -message " | DBA - Database Backup - USER_DATABASES - LOG            | Daily           | 15m int |" -type "Info"
-    Log-Message -message " | DBA - Database Integrity Check - USER_DATABASES         | Saturday        | 23:45   |" -type "Info"
-    Log-Message -message " | DBA - Index Optimize - USER_DATABASES                   | Friday          | 18:00   |" -type "Info"
-    Log-Message -message " | DBA - Statistics Update - USER_DATABASES                | Daily           | 03:00   |" -type "Info"
-
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | System databases                                        |                 |         |" -type "Info"
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | DBA - Database Backup - SYSTEM_DATABASES - FULL         | Daily           | 21:05   |" -type "Info"
-    Log-Message -message " | DBA - Database Integrity Check - SYSTEM_DATABASES       | Sunday          | 20:45   |" -type "Info"
-    Log-Message -message " | DBA - Index And Statistics Optimize - SYSTEM_DATABASES  | Sunday          | 20:15   |" -type "Info"
-
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | Cleanup                                                 |                 |         |" -type "Info"
-    Log-Message -message " |---------------------------------------------------------|-----------------|---------|" -type "Info"
-    Log-Message -message " | DBA - Delete Backup History                             | Sunday          | 02:05   |" -type "Info"
-    Log-Message -message " | DBA - Purge Job History                                 | Sunday          | 02:05   |" -type "Info"
-    Log-Message -message " | DBA - Command Log Cleanup                               | Sunday          | 02:05   |" -type "Info"
-    Log-Message -message " | DBA - Output File Cleanup                               | Sunday          | 02:05   |" -type "Info"
-    Log-Message -message " | DBA - Purge Mail Items                                  | Sunday          | 02:05   |" -type "Info"
-    Log-Message -message " ---------------------------------------------------------------------------------------" -type "Info"
-    Log-Message -message "" -type "Info"
 }
 
 # Function to validate collation
@@ -876,6 +843,10 @@ function Test-Collation {
 # Main Function to install and configure SQL Server
 function Invoke-InstallSqlServer {
     try {
+        Show-ProgressMessage -activity "Validation" -status "Validating volume paths and block sizes" -percentComplete 0
+        Test-Volume -paths @($SqlTempDbDir, $SqlTempDbLog, $SqlLogDir, $SqlDataDir, $SqlBackupDir)
+        Show-ProgressMessage -activity "Validation" -status "Volume paths and block sizes validated" -percentComplete 100
+
         Show-ProgressMessage -activity "Validation" -status "Validating collation" -percentComplete 0
         Test-Collation -collation $collation -scriptDir $scriptDir
         Show-ProgressMessage -activity "Validation" -status "Collation validated" -percentComplete 100
@@ -883,10 +854,6 @@ function Invoke-InstallSqlServer {
         Show-ProgressMessage -activity "Initialization" -status "Initializing dbatools module" -percentComplete 0
         Initialize-DbatoolsModule
         Show-ProgressMessage -activity "Initialization" -status "dbatools module initialized" -percentComplete 100
-
-        Show-ProgressMessage -activity "Validation" -status "Verifying volume paths and block sizes" -percentComplete 0
-        Test-Volume -paths @($SqlTempDbDir, $SqlTempDbLog, $SqlLogDir, $SqlDataDir, $SqlBackupDir)
-        Show-ProgressMessage -activity "Validation" -status "Volume paths and block sizes verified" -percentComplete 100
 
         Read-Passwords
 
