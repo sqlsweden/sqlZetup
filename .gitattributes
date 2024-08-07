@@ -2,6 +2,7 @@
 *.ps1    text eol=lf
 *.psm1   text eol=lf
 *.sql    text eol=lf
+*.md     text eol=lf
 
 # Specify file types and their diff and merge strategies
 *.ps1    diff
