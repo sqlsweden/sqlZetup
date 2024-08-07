@@ -1,4 +1,5 @@
-function Install-SQLServer {
+function Install-SQLZetup {
+    [CmdletBinding()]
     <#
     .SYNOPSIS
         Automates the installation and configuration of SQL Server, including additional setup tasks and optional SSMS installation.
@@ -95,7 +96,7 @@ function Install-SQLServer {
         Enables debug mode for detailed logging.
 
     .EXAMPLE
-        Install-SQLServer -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x64-ENU-Dev.iso" -SsmsInstallerFileName "SSMS-Setup-ENU.exe" -Version 2022 -Edition "Developer" -Collation "Finnish_Swedish_CI_AS" -SqlSvcAccount "agdemo\sqlengine" -AgtSvcAccount "agdemo\sqlagent" -AdminAccount "agdemo\sqlgroup" -SqlDataDir "E:\MSSQL\Data" -SqlLogDir "F:\MSSQL\Log" -SqlBackupDir "H:\MSSQL\Backup" -SqlTempDbDir "G:\MSSQL\Data" -TempdbDataFileSize 512 -TempdbDataFileGrowth 64 -TempdbLogFileSize 64 -TempdbLogFileGrowth 64 -Port 1433 -InstallSsms $true -DebugMode $false
+        Install-SQLZetup -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x64-ENU-Dev.iso" -SsmsInstallerFileName "SSMS-Setup-ENU.exe" -Version 2022 -Edition "Developer" -Collation "Finnish_Swedish_CI_AS" -SqlSvcAccount "agdemo\sqlengine" -AgtSvcAccount "agdemo\sqlagent" -AdminAccount "agdemo\sqlgroup" -SqlDataDir "E:\MSSQL\Data" -SqlLogDir "F:\MSSQL\Log" -SqlBackupDir "H:\MSSQL\Backup" -SqlTempDbDir "G:\MSSQL\Data" -TempdbDataFileSize 512 -TempdbDataFileGrowth 64 -TempdbLogFileSize 64 -TempdbLogFileGrowth 64 -Port 1433 -InstallSsms $true -DebugMode $false
 
     .NOTES
         Author: Michael Pettersson, Cegal
@@ -104,33 +105,53 @@ function Install-SQLServer {
     #>
 
     param (
-        [string]$SqlZetupRoot = "C:\Temp\sqlZetup", # Update this path as necessary
-        [string]$IsoFileName = "SQLServer2022-x64-ENU-Dev.iso", # Update this file name as necessary
-        [string]$SsmsInstallerFileName = "SSMS-Setup-ENU.exe", # Update this file name as necessary
+        [Parameter(Mandatory = $true)]    
+        [string]$SqlZetupRoot,
+        [string]$IsoFileName,
+        [Parameter(Mandatory = $true)]
+        [string]$SsmsInstallerFileName = "SSMS-Setup-ENU.exe",
+        [Parameter(Mandatory = $true)]
         [ValidateSet(2016, 2017, 2019, 2022)]
-        [int]$Version = 2022,
+        [int]$Version,
+        [Parameter(Mandatory = $true)]
         [ValidateSet("Developer", "Standard", "Enterprise")]
-        [string]$Edition = "Developer",
-        [string]$ProductKey = $null, # Add your product key if using Standard or Enterprise edition
-        [string]$Collation = "Finnish_Swedish_CI_AS",
-        [string]$SqlSvcAccount = "agdemo\sqlengine",
-        [string]$AgtSvcAccount = "agdemo\sqlagent",
-        [string]$AdminAccount = "agdemo\sqlgroup",
-        [string]$SqlDataDir = "E:\MSSQL\Data",
-        [string]$SqlLogDir = "F:\MSSQL\Log",
-        [string]$SqlBackupDir = "H:\MSSQL\Backup",
-        [string]$SqlTempDbDir = "G:\MSSQL\Data",
-        [string]$SqlTempDbLog = $SqlLogDir,
+        [string]$Edition,
+        [string]$ProductKey,
+        [Parameter(Mandatory = $true)]
+        [string]$Collation,
+        [Parameter(Mandatory = $true)]
+        [string]$SqlSvcAccount,
+        [Parameter(Mandatory = $true)]
+        [string]$AgtSvcAccount,
+        [Parameter(Mandatory = $true)]
+        [string]$AdminAccount,
+        [Parameter(Mandatory = $true)]
+        [string]$SqlDataDir,
+        [Parameter(Mandatory = $true)]
+        [string]$SqlLogDir,
+        [Parameter(Mandatory = $true)]
+        [string]$SqlBackupDir,
+        [Parameter(Mandatory = $true)]
+        [string]$SqlTempDbDir,
+        [Parameter(Mandatory = $true)]
         [ValidateRange(512, [int]::MaxValue)]
-        [int]$TempdbDataFileSize = 512,
-        [int]$TempdbDataFileGrowth = 64,
+        [int]$TempdbDataFileSize,
+        [Parameter(Mandatory = $true)]
+        [int]$TempdbDataFileGrowth,
         [ValidateRange(64, [int]::MaxValue)]
-        [int]$TempdbLogFileSize = 64,
-        [int]$TempdbLogFileGrowth = 64,
-        [int]$Port = 1433,
+        [int]$TempdbLogFileSize,
+        [Parameter(Mandatory = $true)]
+        [int]$TempdbLogFileGrowth,
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+        [Parameter(Mandatory = $true)]
         [bool]$InstallSsms = $true,
+        [Parameter(Mandatory = $true)]
         [bool]$DebugMode = $false
     )
+
+    # Set the $SqlTempDbLog variable based on $SqlLogDir
+    $SqlTempDbLog = $SqlLogDir
 
     function Write-Message {
         <#
@@ -1211,7 +1232,7 @@ END
         }
     }
 
-    function Invoke-InstallSqlServer {
+    function Invoke-SQLZetup {
         <#
         .SYNOPSIS
             Main function to invoke the SQL Server installation process.
@@ -1220,7 +1241,7 @@ END
             This function orchestrates the entire SQL Server installation and configuration process, calling other functions as necessary.
 
         .EXAMPLE
-            Invoke-InstallSqlServer
+            Invoke-SQLZetup
         #>
         try {
             Show-ProgressMessage -Activity "Validation" -Status "Validating volume paths and block sizes" -PercentComplete 0
@@ -1280,7 +1301,5 @@ END
     $Server = $env:COMPUTERNAME
     $TableName = "CommandLog"
 
-    Invoke-InstallSqlServer
+    Invoke-SQLZetup
 }
-
-Install-SQLServer -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x64-ENU-Dev.iso" -SsmsInstallerFileName "SSMS-Setup-ENU.exe" -Version 2022 -Edition "Developer" -Collation "Finnish_Swedish_CI_AS" -SqlSvcAccount "agdemo\sqlengine" -AgtSvcAccount "agdemo\sqlagent" -AdminAccount "agdemo\sqlgroup" -SqlDataDir "E:\MSSQL\Data" -SqlLogDir "F:\MSSQL\Log" -SqlBackupDir "H:\MSSQL\Backup" -SqlTempDbDir "G:\MSSQL\Data" -TempdbDataFileSize 512 -TempdbDataFileGrowth 64 -TempdbLogFileSize 64 -TempdbLogFileGrowth 64 -Port 1433 -InstallSsms $true -DebugMode $false
