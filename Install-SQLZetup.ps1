@@ -100,7 +100,7 @@ function Install-SQLZetup {
 
     .NOTES
         Author: Michael Pettersson, Cegal
-        Version: 1.0
+        Version: 1.0.0
         License: MIT License
     #>
 
