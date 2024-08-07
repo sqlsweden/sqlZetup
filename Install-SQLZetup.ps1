@@ -1177,18 +1177,18 @@ END
 
     function Show-FinalMessage {
         <#
-        .SYNOPSIS
-            Displays a final message indicating completion.
+    .SYNOPSIS
+        Displays a final message indicating completion.
 
-        .DESCRIPTION
-            This function writes a final message to the host indicating the successful completion of the SQL Server installation and configuration.
+    .DESCRIPTION
+        This function writes a final message to the host indicating the successful completion of the SQL Server installation and configuration.
 
-        .EXAMPLE
-            Show-FinalMessage
-        #>
+    .EXAMPLE
+        Show-FinalMessage
+    #>
         Write-Message -Message "SQL Server installation and configuration completed successfully." -Type "Info"
         if ($DebugMode) { 
-            Write-Message -Message "SQL Server installation and configuration completed successfully on server $Server" -Type "Info"
+            Write-Message -Message "SQL Server installation and configuration completed successfully on server $Server." -Type "Info"
         }
 
         $sqlVersionDirectory = switch ($Version) {
@@ -1205,13 +1205,14 @@ END
         Write-Message -Message "" -Type "Info"
         Write-Message -Message "Installation Complete! Here is some additional information:" -Type "Info"
         Write-Message -Message "----------------------------------------------------------------------------------------" -Type "Info"
-        Write-Message -Message "- Log Files: Check the installation log located at:" -Type "Info"
+        Write-Message -Message "Log Files: You can find the installation log at the following location:" -Type "Info"
         Write-Message -Message "  C:\Program Files\Microsoft SQL Server\$sqlVersionDirectory\Setup Bootstrap\Log\Summary.txt" -Type "Info"
-        Write-Message -Message "- Setup Monitoring: Visit the following URL to find a script for manual setup." -Type "Info"
+        Write-Message -Message "Setup Monitoring: To manually set up monitoring, visit the following URL:" -Type "Info"
         Write-Message -Message "  https://github.com/sqlsweden/sqlZetup/blob/main/Monitoring/zetupMonitoring.sql" -Type "Info"
-        Write-Message -Message "- Include the backup volume in the backup for the file level backup." -Type "Info"
-        Write-Message -Message "- Exclude the database files and folders from the antivirus software if it's used." -Type "Info"
-        Write-Message -Message "- Document the passwords used in this installation at the proper location." -Type "Info"
+        Write-Message -Message "Backup Information: Ensure the backup volume is included in the central backup solution." -Type "Info"
+        Write-Message -Message "Antivirus Exclusion: Exclude SQL Server files and folders from antivirus scanning if applicable." -Type "Info"
+        Write-Message -Message "Password Documentation: Document the passwords used during the installation." -Type "Info"
+        Write-Message -Message "Additional Documentation: You can find more information under sqlzetup\\doc." -Type "Info"
         Write-Message -Message "" -Type "Info"
     }
 
