@@ -105,47 +105,67 @@ function Install-SQLZetup {
     #>
 
     param (
-        [Parameter(Mandatory = $true)]    
+        [Parameter(Mandatory = $true)]
         [string]$SqlZetupRoot,
+        
         [string]$IsoFileName,
+
         [Parameter(Mandatory = $true)]
         [string]$SsmsInstallerFileName = "SSMS-Setup-ENU.exe",
+        
         [Parameter(Mandatory = $true)]
         [ValidateSet(2016, 2017, 2019, 2022)]
-        [int]$Version,
+        [int]$Version = 2022,
+        
         [Parameter(Mandatory = $true)]
         [ValidateSet("Developer", "Standard", "Enterprise")]
         [string]$Edition,
+        
         [string]$ProductKey,
+
         [Parameter(Mandatory = $true)]
-        [string]$Collation,
+        [string]$Collation = "Finnish_Swedish_CI_AS",
+
         [Parameter(Mandatory = $true)]
         [string]$SqlSvcAccount,
+
         [Parameter(Mandatory = $true)]
         [string]$AgtSvcAccount,
+
         [Parameter(Mandatory = $true)]
         [string]$AdminAccount,
+
         [Parameter(Mandatory = $true)]
-        [string]$SqlDataDir,
+        [string]$SqlDataDir = "E:\MSSQL\Data",
+
         [Parameter(Mandatory = $true)]
-        [string]$SqlLogDir,
+        [string]$SqlLogDir = "F:\MSSQL\Log",
+
         [Parameter(Mandatory = $true)]
-        [string]$SqlBackupDir,
+        [string]$SqlBackupDir = "H:\MSSQL\Backup",
+
         [Parameter(Mandatory = $true)]
-        [string]$SqlTempDbDir,
+        [string]$SqlTempDbDir = "G:\MSSQL\Data",
+
         [Parameter(Mandatory = $true)]
         [ValidateRange(512, [int]::MaxValue)]
-        [int]$TempdbDataFileSize,
+        [int]$TempdbDataFileSize = 512,
+
         [Parameter(Mandatory = $true)]
-        [int]$TempdbDataFileGrowth,
+        [int]$TempdbDataFileGrowth = 64,
+
         [ValidateRange(64, [int]::MaxValue)]
-        [int]$TempdbLogFileSize,
+        [int]$TempdbLogFileSize = 64,
+
         [Parameter(Mandatory = $true)]
-        [int]$TempdbLogFileGrowth,
+        [int]$TempdbLogFileGrowth = 64,
+
         [Parameter(Mandatory = $true)]
-        [int]$Port,
+        [int]$Port = 1433,
+
         [Parameter(Mandatory = $true)]
         [bool]$InstallSsms = $true,
+
         [Parameter(Mandatory = $true)]
         [bool]$DebugMode = $false
     )
