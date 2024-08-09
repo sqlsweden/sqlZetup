@@ -6,19 +6,21 @@
 
 ## Key Features
 
-- **Automated Installation:** Mounts the SQL Server ISO and retrieves the setup executable, installs SQL Server with specified configurations, and ensures the SQL Server Agent is running.
+- **Automated Installation:** Mounts the SQL Server ISO and retrieves the setup executable, installs SQL Server with specified configuration.
 
-- **Configuration:** Configures TempDB settings, error log settings, and other SQL Server parameters.
+- **Configuration:** Performs a complete configuration of SQL Server that covers all aspects concerning performance, availability, and security.
 
-- **Script Execution:** Executes a series of SQL scripts in a specified order.
+- **Script Execution:** Executes a series of SQL scripts in a specified order that includes, amongst other things, creating a DBA database and setting up and scheduling Ola Hallengren's Maintenance Solution for SQL Server.
 
 - **SSMS Installation:** Checks for and optionally installs SQL Server Management Studio (SSMS).
 
-- **Updates:** Applies necessary updates to SQL Server.
+- **Updates:** Applies necessary updates to SQL Server when available after manual upload.
 
 - **Flexibility:** Utilizes relative paths for flexibility in script and directory locations, and provides secure prompts for sensitive information such as passwords.
 
 - **Volume Checks:** Ensures volume block sizes are optimized for SQL Server.
+
+[Return to top](#sqlzetup)
 
 ## Supported SQL Server Versions
 
@@ -30,6 +32,8 @@
 
 - 2022
 
+[Return to top](#sqlzetup)
+
 ## Supported Editions
 
 - Developer (for test and development)
@@ -37,6 +41,41 @@
 - Standard
 
 - Enterprise
+
+[Return to top](#sqlzetup)
+
+## Installation
+
+To install the solution, follow the steps below:
+
+1. Download the latest release from the [GitHub Releases](https://github.com/sqlsweden/SQLZetup/releases) page. Make sure to include `dbatools` if needed.
+2. Upload the downloaded files to the target machine and extract the `.zip` file. You can extract it to a directory such as `C:\Temp`.
+3. Place the installation media files, such as `SQLServer2022-x64-ENU-Dev.iso` and `SSMS-Setup-ENU.exe`, in the appropriate directories as shown below.
+4. **SQL Server updates** and SSMS can be downloaded from [https://sqlserverupdates.com/](https://sqlserverupdates.com/). Once downloaded, updates should be manually placed in the correct directory under `Updates`, as shown below. For example, `SQLServer2022-KB5036432-x64.exe` should be placed in the `2022/` folder.
+
+Here is an example of the directory structure after extraction and placement of required files:
+
+```markdown
+sqlzetup/
+├── Doc/
+├── Monitoring/
+├── Sql/
+├── Updates/
+│   ├── 2016/
+│   ├── 2017/
+│   ├── 2019/
+│   ├── 2022/
+│   └── SQLServer2022-KB5036432-x64.exe
+├── .gitattributes
+├── .gitignore
+├── Install-SQLZetup.ps1
+├── LICENSE.txt
+├── README.md
+├── SQLServer2022-x64-ENU-Dev.iso
+└── SSMS-Setup-ENU.exe
+```
+
+[Return to top](#sqlzetup)
 
 ## Parameters
 
@@ -82,11 +121,26 @@
 
 - **´DebugMode´** (Mandatory): Enables debug mode for detailed logging. Default is **$false**.
 
+[Return to top](#sqlzetup)
+
 ## Example
 
 ```powershell
 Install-SQLZetup -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x64-ENU-Dev.iso" -SsmsInstallerFileName "SSMS-Setup-ENU.exe" -Version 2022 -Edition "Developer" -Collation "Finnish_Swedish_CI_AS" -SqlSvcAccount "agdemo\sqlengine" -AgtSvcAccount "agdemo\sqlagent" -AdminAccount "agdemo\sqlgroup" -SqlDataDir "E:\MSSQL\Data" -SqlLogDir "F:\MSSQL\Log" -SqlBackupDir "H:\MSSQL\Backup" -SqlTempDbDir "G:\MSSQL\Data" -TempdbDataFileSize 512 -TempdbDataFileGrowth 64 -TempdbLogFileSize 64 -TempdbLogFileGrowth 64 -Port 1433 -InstallSsms $true -DebugMode $false
 ```
+
+[Return to top](#sqlzetup)
+
+## Report Issues or Request Features
+
+If you encounter any issues or have feature requests, please use the following options:
+
+- **Report an issue**: Go to [Issues](https://github.com/sqlsweden/SQLZetup/issues) on GitHub to open a new issue.
+- **Request new features**: Go to [Discussions](https://github.com/sqlsweden/SQLZetup/discussions) on GitHub to discuss new features or improvements.
+
+Your feedback is valuable, and I appreciate your contributions!
+
+[Return to top](#sqlzetup)
 
 ## Notes
 
@@ -96,8 +150,12 @@ Install-SQLZetup -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x6
 
 - **License:** MIT License
 
+[Return to top](#sqlzetup)
+
 ## License
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) file for details.
+
+[Return to top](#sqlzetup)
