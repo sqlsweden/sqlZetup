@@ -144,11 +144,7 @@ Your feedback is valuable, and I appreciate your contributions!
 
 ## Notes
 
-- **Author:** Michael Pettersson, Cegal
-
-- **Version:** 1.0.0
-
-- **License:** MIT License
+- **Author:** Michael Pettersson
 
 [Return to top](#sqlzetup)
 
