@@ -3,3 +3,6 @@ RestoreVM.ps1
 
 # Ignore ToDo.txt
 ToDo.txt
+
+# Ignore MergeBranches.txt
+MergeBranches.txt
