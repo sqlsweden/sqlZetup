@@ -1,5 +1,4 @@
 function Install-SQLZetup {
-    [CmdletBinding()]
     <#
     .SYNOPSIS
         Automates the installation and configuration of SQL Server, including additional setup tasks and optional SSMS installation.
@@ -99,11 +98,12 @@ function Install-SQLZetup {
         Install-SQLZetup -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x64-ENU-Dev.iso" -SsmsInstallerFileName "SSMS-Setup-ENU.exe" -Version 2022 -Edition "Developer" -Collation "Finnish_Swedish_CI_AS" -SqlSvcAccount "agdemo\sqlengine" -AgtSvcAccount "agdemo\sqlagent" -AdminAccount "agdemo\sqlgroup" -SqlDataDir "E:\MSSQL\Data" -SqlLogDir "F:\MSSQL\Log" -SqlBackupDir "H:\MSSQL\Backup" -SqlTempDbDir "G:\MSSQL\Data" -TempdbDataFileSize 512 -TempdbDataFileGrowth 64 -TempdbLogFileSize 64 -TempdbLogFileGrowth 64 -Port 1433 -InstallSsms $true -DebugMode $false
 
     .NOTES
-        Author: Michael Pettersson, Cegal
+        Author: Michael Pettersson
         Version: 1.0.0
         License: MIT License
     #>
-
+    
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$SqlZetupRoot,
