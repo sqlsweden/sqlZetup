@@ -20,8 +20,6 @@
 
 - **Volume Checks:** Ensures volume block sizes are optimized for SQL Server.
 
-[Return to top](#sqlzetup)
-
 ## Supported SQL Server Versions
 
 - 2016
@@ -32,8 +30,6 @@
 
 - 2022
 
-[Return to top](#sqlzetup)
-
 ## Supported Editions
 
 - Developer (for test and development)
@@ -41,8 +37,6 @@
 - Standard
 
 - Enterprise
-
-[Return to top](#sqlzetup)
 
 ## Installation
 
@@ -129,7 +123,20 @@ sqlzetup/
 Install-SQLZetup -SqlZetupRoot "C:\Temp\sqlZetup" -IsoFileName "SQLServer2022-x64-ENU-Dev.iso" -SsmsInstallerFileName "SSMS-Setup-ENU.exe" -Version 2022 -Edition "Developer" -Collation "Finnish_Swedish_CI_AS" -SqlSvcAccount "agdemo\sqlengine" -AgtSvcAccount "agdemo\sqlagent" -AdminAccount "agdemo\sqlgroup" -SqlDataDir "E:\MSSQL\Data" -SqlLogDir "F:\MSSQL\Log" -SqlBackupDir "H:\MSSQL\Backup" -SqlTempDbDir "G:\MSSQL\Data" -TempdbDataFileSize 512 -TempdbDataFileGrowth 64 -TempdbLogFileSize 64 -TempdbLogFileGrowth 64 -Port 1433 -InstallSsms $true -DebugMode $false
 ```
 
-[Return to top](#sqlzetup)
+## Post-Installation and Manual Configurations
+
+After the automated installation process is complete, additional configurations might be necessary to optimize and secure your SQL Server environment. Below are some manual steps that should be performed:
+
+### Manual Configurations and Post-Installation Steps
+
+- Configuring System Settings
+- Data Protection Strategies
+- Database Monitoring For DBAs
+- Database Setup
+- Instance Configuration
+- Reschedule Maintenance Jobs for RPO/RTO Compliance
+
+For detailed instructions on these steps, please refer to the [Wiki](https://github.com/sqlsweden/sqlZetup/wiki).
 
 ## Report Issues or Request Features
 
@@ -140,13 +147,9 @@ If you encounter any issues or have feature requests, please use the following o
 
 Your feedback is valuable, and I appreciate your contributions!
 
-[Return to top](#sqlzetup)
-
 ## Notes
 
 - **Author:** Michael Pettersson
-
-[Return to top](#sqlzetup)
 
 ## License
 
